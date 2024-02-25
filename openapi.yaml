@@ -1,0 +1,188 @@
+openapi: 3.0.3
+info:
+  title: Swagger Customer specific test
+  description: |-
+    API to check whether CSTs are available for the given product details.
+    - Request payload: product-name, product-base-version , update-level, project-key
+    Eg :-   {
+    "product-name":"wso2am",
+    "product-base-version":"4.2.0",
+    "update-level":"200",
+    "project-key":"BNYMellonProd"
+       }
+     - Response body: Available list of CSTs for the given details. (empty array if no tests available)
+
+    API to trigger the CSTs with the given CST details.
+     - Request payload: (parameters we discussed the other day) Customer key, product name, product version etc.
+     - Response body: Assigned queue/test ID
+
+    API to check the status of the processed/processing CSTs with the given test ID.
+      - Path parameter: Test ID
+     - Request Payload: nill
+     - Response body: Details of the CSTs related to the given test ID. (array of CST name, test status [QUEUED, PROCESSING, PASSED, FAILED, TERMINATED], message (eg: failure message))
+
+    eg:
+    [
+        {
+            name: "BNY-apim-xxx-test",
+            status: "PROCESSING",
+            message: ""
+        },
+        {
+            name: "CA-apim-xxx-test",
+            status: "PASSED",
+            message: "Test successfully passed."
+        },
+        {
+            name: "CA-apim-xxx-test",
+            status: "FAILED",
+            message: "XXX test case failed due to ... ."
+        }
+    ]
+  version: 1.0.11
+servers:
+  - url: http://localhost:5000
+tags:
+  - name: cst
+    description: Customer specific tests
+    externalDocs:
+      description: Find out more
+      url: http://swagger.io
+paths:
+  "/cst/":
+    post:
+      tags:
+        - cst
+      summary: Add Products with the corresponding customer details
+      description: Add Products with the corresponding customer details
+        version and customer of the U2 update
+      operationId: addPet
+      requestBody:
+        description: Provide the product details with the corresponding customer_key
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                example:
+                  - customer_key: BNYM
+                    product_name: wso2am
+                    product_version: 3.2.0
+                  - customer_key: Credit Agricole
+                    product_name: wso2am
+                    product_version: 3.2.0
+        required: true
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    customer_key:
+                      type: string
+                      nullable: true
+                    product_name:
+                      type: string
+                    product_base_version:
+                      type: string
+                  example:
+                    - id: 3bbc5c46-fd11-4408-b5ba-46aef64223ba
+                      customer_key: BNYM
+                      product_name: wso2am
+                      product_base_version: 3.2.0
+                    - id: 5b0aa9cc-b146-4cb6-ac2d-a75dc33aee8a
+                      customer_key: Credit Agricole
+                      product_name: wso2am
+                      product_base_version: 3.2.0
+        "400":
+          description: Invalid input
+        "422":
+          description: Validation exception
+  "/cst/all":
+    get:
+      tags:
+        - cst
+      summary: Returns all the ARR custmer details with their products
+      description: Returns all the ARR custmer details with their products
+      responses:
+        "200":
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: object
+                example:
+                  - id: 3bbc5c46-fd11-4408-b5ba-46aef64223ba
+                    customer_key: BNYM
+                    product_name: wso2am
+                    product_base_version: 3.2.0
+                  - id: 5b0aa9cc-b146-4cb6-ac2d-a75dc33aee8a
+                    customer_key: Credit Agricole
+                    product_name: wso2am
+                    product_base_version: 3.2.0
+                  - id: c6c5c7d5-63dc-4e2c-a2bc-7571c198e6c9
+                    customer_key: BNYM
+                    product_name: wso2ei
+                    product_base_version: "1.8"
+
+        "400":
+          description: Invalid status value
+  "/cst/filtercst":
+    post:
+      tags:
+        - cst
+      summary: Returns job status
+      description:
+        Returns the status of the jobs being processed by the Azure Devops
+        pipeline
+      requestBody:
+        description: Provide the list of object with the respective product and product version which the u2 updates are applicable
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                example:
+                  - product_name: wso2am
+                    product_base_version: 3.2.0
+                  - product_name: wso2ei
+                    product_base_version: "1.8"
+        required: true
+      responses:
+        "200":
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    result:
+                      type: string
+                      nullable: true
+                    state:
+                      type: string
+                  example:
+                    - id: 285a79e4-ccfa-4680-9581-332f03900a37
+                      customer_key: Credit Agricole
+                      product_name: choreo-connect
+                      product_base_version: "2.5"
+                    - id: 3bbc5c46-fd11-4408-b5ba-46aef64223ba
+                      customer_key: BNYM
+                      product_name: wso2am
+                      product_base_version: 3.2.0
+                    - id: 5b0aa9cc-b146-4cb6-ac2d-a75dc33aee8a
+                      customer_key: Credit Agricole
+                      product_name: wso2am
+                      product_base_version: 3.2.0
