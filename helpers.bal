@@ -12,7 +12,7 @@ isolated function initializeClient() returns Client|persist:Error {
 } 
 
 
-function get_customers_to_insert(customerInsert[] list) returns customersInsert[]{
+isolated function get_customers_to_insert(customerInsert[] list) returns customersInsert[]{
     customersInsert[] cst_info_list = [];
 
         foreach customerInsert item in list {
