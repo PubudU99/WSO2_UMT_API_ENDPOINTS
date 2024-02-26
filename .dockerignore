@@ -1,4 +1,3 @@
 # .dockerignore
 target
-generated
 Config.toml
