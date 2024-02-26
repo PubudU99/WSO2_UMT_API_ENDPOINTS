@@ -13,7 +13,7 @@ service /cst on endpoint {
         return sClient->/customers.post(cst_info_list);
     }
 
-    isolated resource function get .() returns customers[]|persist:Error? {
+    isolated resource function get all() returns customers[]|persist:Error? {
         stream<customers, persist:Error?> response = sClient->/customers;
         return check from customers customer in response
            select customer;
