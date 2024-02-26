@@ -6,8 +6,6 @@ listener http:Listener endpoint = new (5000);
 
 final Client sClient = check initializeClient();
 
-
-
 service /cst on endpoint {
     
     isolated resource function post .(customerInsert[] list) returns string[]|persist:Error {

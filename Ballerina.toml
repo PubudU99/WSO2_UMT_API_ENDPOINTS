@@ -11,7 +11,7 @@ observabilityIncluded = true
 datastore = "mysql"
 module = "APIS_UMT"
 
-[[platform.java17.dependency]]
+[[platform.java11.dependency]]
 groupId = "io.ballerina.stdlib"
 artifactId = "persist.sql-native"
-version = "1.2.0"
+version = "1.2.1"
