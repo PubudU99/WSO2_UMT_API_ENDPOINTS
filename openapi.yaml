@@ -41,7 +41,7 @@ info:
     ]
   version: 1.0.11
 servers:
-  - url: http://localhost:5000/cst
+  - url: http://localhost:5000
 tags:
   - name: cst
     description: Customer specific tests
@@ -49,7 +49,7 @@ tags:
       description: Find out more
       url: http://swagger.io
 paths:
-  "/":
+  "/cst/":
     post:
       tags:
         - cst
@@ -105,7 +105,7 @@ paths:
           description: Invalid input
         "422":
           description: Validation exception
-  "/all":
+  "/cst/all":
     get:
       tags:
         - cst
@@ -134,7 +134,7 @@ paths:
 
         "400":
           description: Invalid status value
-  "/filtercst":
+  "/cst/filtercst":
     post:
       tags:
         - cst
