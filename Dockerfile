@@ -6,6 +6,4 @@ USER root
 RUN adduser -u 10001 -S appuser && chown -hR 10001 /home/APIS_UMT && \
     chmod -R 755 /home/APIS_UMT
 USER 10001
-RUN bal persist generate
-RUN rm Config.toml
 CMD bal run 
