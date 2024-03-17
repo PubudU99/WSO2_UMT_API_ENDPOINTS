@@ -8,7 +8,10 @@ import ballerinax/mysql;
 import ballerinax/mysql.driver as _;
 import ballerinax/persist.sql as psql;
 
-const CUSTOMERS = "customers";
+const CUSTOMER = "customers";
+const CICD_BUILD = "cicd_builds";
+const CI_BUILD = "ci_builds";
+const CD_BUILD = "cd_builds";
 
 public isolated client class Client {
     *persist:AbstractPersistClient;
@@ -18,16 +21,77 @@ public isolated client class Client {
     private final map<psql:SQLClient> persistClients;
 
     private final record {|psql:SQLMetadata...;|} & readonly metadata = {
-        [CUSTOMERS] : {
-            entityName: "customers",
-            tableName: "customers",
+        [CUSTOMER] : {
+            entityName: "customer",
+            tableName: "customer",
             fieldMetadata: {
                 id: {columnName: "id"},
                 customer_key: {columnName: "customer_key"},
+                environment: {columnName: "environment"},
                 product_name: {columnName: "product_name"},
-                product_base_version: {columnName: "product_base_version"}
+                product_base_version: {columnName: "product_base_version"},
+                u2_level: {columnName: "u2_level"}
             },
             keyFields: ["id"]
+        },
+        [CICD_BUILD] : {
+            entityName: "cicd_build",
+            tableName: "cicd_build",
+            fieldMetadata: {
+                id: {columnName: "id"},
+                uuid: {columnName: "uuid"},
+                "ci_builds[].id": {relation: {entityName: "ci_builds", refField: "id"}},
+                "ci_builds[].uuid": {relation: {entityName: "ci_builds", refField: "uuid"}},
+                "ci_builds[].ci_build_id": {relation: {entityName: "ci_builds", refField: "ci_build_id"}},
+                "ci_builds[].ci_status": {relation: {entityName: "ci_builds", refField: "ci_status"}},
+                "ci_builds[].product": {relation: {entityName: "ci_builds", refField: "product"}},
+                "ci_builds[].version": {relation: {entityName: "ci_builds", refField: "version"}},
+                "ci_builds[].cicd_buildId": {relation: {entityName: "ci_builds", refField: "cicd_buildId"}},
+                "cd_builds[].id": {relation: {entityName: "cd_builds", refField: "id"}},
+                "cd_builds[].uuid": {relation: {entityName: "cd_builds", refField: "uuid"}},
+                "cd_builds[].cd_build_id": {relation: {entityName: "cd_builds", refField: "cd_build_id"}},
+                "cd_builds[].cd_status": {relation: {entityName: "cd_builds", refField: "cd_status"}},
+                "cd_builds[].customer": {relation: {entityName: "cd_builds", refField: "customer"}},
+                "cd_builds[].cicd_buildId": {relation: {entityName: "cd_builds", refField: "cicd_buildId"}}
+            },
+            keyFields: ["id"],
+            joinMetadata: {
+                ci_builds: {entity: ci_build, fieldName: "ci_builds", refTable: "ci_build", refColumns: ["cicd_buildId"], joinColumns: ["id"], 'type: psql:MANY_TO_ONE},
+                cd_builds: {entity: cd_build, fieldName: "cd_builds", refTable: "cd_build", refColumns: ["cicd_buildId"], joinColumns: ["id"], 'type: psql:MANY_TO_ONE}
+            }
+        },
+        [CI_BUILD] : {
+            entityName: "ci_build",
+            tableName: "ci_build",
+            fieldMetadata: {
+                id: {columnName: "id"},
+                uuid: {columnName: "uuid"},
+                ci_build_id: {columnName: "ci_build_id"},
+                ci_status: {columnName: "ci_status"},
+                product: {columnName: "product"},
+                version: {columnName: "version"},
+                cicd_buildId: {columnName: "cicd_buildId"},
+                "cicd_build.id": {relation: {entityName: "cicd_build", refField: "id"}},
+                "cicd_build.uuid": {relation: {entityName: "cicd_build", refField: "uuid"}}
+            },
+            keyFields: ["id"],
+            joinMetadata: {cicd_build: {entity: cicd_build, fieldName: "cicd_build", refTable: "cicd_build", refColumns: ["id"], joinColumns: ["cicd_buildId"], 'type: psql:ONE_TO_MANY}}
+        },
+        [CD_BUILD] : {
+            entityName: "cd_build",
+            tableName: "cd_build",
+            fieldMetadata: {
+                id: {columnName: "id"},
+                uuid: {columnName: "uuid"},
+                cd_build_id: {columnName: "cd_build_id"},
+                cd_status: {columnName: "cd_status"},
+                customer: {columnName: "customer"},
+                cicd_buildId: {columnName: "cicd_buildId"},
+                "cicd_build.id": {relation: {entityName: "cicd_build", refField: "id"}},
+                "cicd_build.uuid": {relation: {entityName: "cicd_build", refField: "uuid"}}
+            },
+            keyFields: ["id"],
+            joinMetadata: {cicd_build: {entity: cicd_build, fieldName: "cicd_build", refTable: "cicd_build", refColumns: ["id"], joinColumns: ["cicd_buildId"], 'type: psql:ONE_TO_MANY}}
         }
     };
 
@@ -37,43 +101,165 @@ public isolated client class Client {
             return <persist:Error>error(dbClient.message());
         }
         self.dbClient = dbClient;
-        self.persistClients = {[CUSTOMERS] : check new (dbClient, self.metadata.get(CUSTOMERS), psql:MYSQL_SPECIFICS)};
+        self.persistClients = {
+            [CUSTOMER] : check new (dbClient, self.metadata.get(CUSTOMER), psql:MYSQL_SPECIFICS),
+            [CICD_BUILD] : check new (dbClient, self.metadata.get(CICD_BUILD), psql:MYSQL_SPECIFICS),
+            [CI_BUILD] : check new (dbClient, self.metadata.get(CI_BUILD), psql:MYSQL_SPECIFICS),
+            [CD_BUILD] : check new (dbClient, self.metadata.get(CD_BUILD), psql:MYSQL_SPECIFICS)
+        };
     }
 
-    isolated resource function get customers(customersTargetType targetType = <>, sql:ParameterizedQuery whereClause = ``, sql:ParameterizedQuery orderByClause = ``, sql:ParameterizedQuery limitClause = ``, sql:ParameterizedQuery groupByClause = ``) returns stream<targetType, persist:Error?> = @java:Method {
+    isolated resource function get customers(customerTargetType targetType = <>, sql:ParameterizedQuery whereClause = ``, sql:ParameterizedQuery orderByClause = ``, sql:ParameterizedQuery limitClause = ``, sql:ParameterizedQuery groupByClause = ``) returns stream<targetType, persist:Error?> = @java:Method {
         'class: "io.ballerina.stdlib.persist.sql.datastore.MySQLProcessor",
         name: "query"
     } external;
 
-    isolated resource function get customers/[string id](customersTargetType targetType = <>) returns targetType|persist:Error = @java:Method {
+    isolated resource function get customers/[string id](customerTargetType targetType = <>) returns targetType|persist:Error = @java:Method {
         'class: "io.ballerina.stdlib.persist.sql.datastore.MySQLProcessor",
         name: "queryOne"
     } external;
 
-    isolated resource function post customers(customersInsert[] data) returns string[]|persist:Error {
+    isolated resource function post customers(customerInsert[] data) returns string[]|persist:Error {
         psql:SQLClient sqlClient;
         lock {
-            sqlClient = self.persistClients.get(CUSTOMERS);
+            sqlClient = self.persistClients.get(CUSTOMER);
         }
         _ = check sqlClient.runBatchInsertQuery(data);
-        return from customersInsert inserted in data
+        return from customerInsert inserted in data
             select inserted.id;
     }
 
-    isolated resource function put customers/[string id](customersUpdate value) returns customers|persist:Error {
+    isolated resource function put customers/[string id](customerUpdate value) returns customer|persist:Error {
         psql:SQLClient sqlClient;
         lock {
-            sqlClient = self.persistClients.get(CUSTOMERS);
+            sqlClient = self.persistClients.get(CUSTOMER);
         }
         _ = check sqlClient.runUpdateQuery(id, value);
         return self->/customers/[id].get();
     }
 
-    isolated resource function delete customers/[string id]() returns customers|persist:Error {
-        customers result = check self->/customers/[id].get();
+    isolated resource function delete customers/[string id]() returns customer|persist:Error {
+        customer result = check self->/customers/[id].get();
         psql:SQLClient sqlClient;
         lock {
-            sqlClient = self.persistClients.get(CUSTOMERS);
+            sqlClient = self.persistClients.get(CUSTOMER);
+        }
+        _ = check sqlClient.runDeleteQuery(id);
+        return result;
+    }
+
+    isolated resource function get cicd_builds(cicd_buildTargetType targetType = <>, sql:ParameterizedQuery whereClause = ``, sql:ParameterizedQuery orderByClause = ``, sql:ParameterizedQuery limitClause = ``, sql:ParameterizedQuery groupByClause = ``) returns stream<targetType, persist:Error?> = @java:Method {
+        'class: "io.ballerina.stdlib.persist.sql.datastore.MySQLProcessor",
+        name: "query"
+    } external;
+
+    isolated resource function get cicd_builds/[string id](cicd_buildTargetType targetType = <>) returns targetType|persist:Error = @java:Method {
+        'class: "io.ballerina.stdlib.persist.sql.datastore.MySQLProcessor",
+        name: "queryOne"
+    } external;
+
+    isolated resource function post cicd_builds(cicd_buildInsert[] data) returns string[]|persist:Error {
+        psql:SQLClient sqlClient;
+        lock {
+            sqlClient = self.persistClients.get(CICD_BUILD);
+        }
+        _ = check sqlClient.runBatchInsertQuery(data);
+        return from cicd_buildInsert inserted in data
+            select inserted.id;
+    }
+
+    isolated resource function put cicd_builds/[string id](cicd_buildUpdate value) returns cicd_build|persist:Error {
+        psql:SQLClient sqlClient;
+        lock {
+            sqlClient = self.persistClients.get(CICD_BUILD);
+        }
+        _ = check sqlClient.runUpdateQuery(id, value);
+        return self->/cicd_builds/[id].get();
+    }
+
+    isolated resource function delete cicd_builds/[string id]() returns cicd_build|persist:Error {
+        cicd_build result = check self->/cicd_builds/[id].get();
+        psql:SQLClient sqlClient;
+        lock {
+            sqlClient = self.persistClients.get(CICD_BUILD);
+        }
+        _ = check sqlClient.runDeleteQuery(id);
+        return result;
+    }
+
+    isolated resource function get ci_builds(ci_buildTargetType targetType = <>, sql:ParameterizedQuery whereClause = ``, sql:ParameterizedQuery orderByClause = ``, sql:ParameterizedQuery limitClause = ``, sql:ParameterizedQuery groupByClause = ``) returns stream<targetType, persist:Error?> = @java:Method {
+        'class: "io.ballerina.stdlib.persist.sql.datastore.MySQLProcessor",
+        name: "query"
+    } external;
+
+    isolated resource function get ci_builds/[string id](ci_buildTargetType targetType = <>) returns targetType|persist:Error = @java:Method {
+        'class: "io.ballerina.stdlib.persist.sql.datastore.MySQLProcessor",
+        name: "queryOne"
+    } external;
+
+    isolated resource function post ci_builds(ci_buildInsert[] data) returns string[]|persist:Error {
+        psql:SQLClient sqlClient;
+        lock {
+            sqlClient = self.persistClients.get(CI_BUILD);
+        }
+        _ = check sqlClient.runBatchInsertQuery(data);
+        return from ci_buildInsert inserted in data
+            select inserted.id;
+    }
+
+    isolated resource function put ci_builds/[string id](ci_buildUpdate value) returns ci_build|persist:Error {
+        psql:SQLClient sqlClient;
+        lock {
+            sqlClient = self.persistClients.get(CI_BUILD);
+        }
+        _ = check sqlClient.runUpdateQuery(id, value);
+        return self->/ci_builds/[id].get();
+    }
+
+    isolated resource function delete ci_builds/[string id]() returns ci_build|persist:Error {
+        ci_build result = check self->/ci_builds/[id].get();
+        psql:SQLClient sqlClient;
+        lock {
+            sqlClient = self.persistClients.get(CI_BUILD);
+        }
+        _ = check sqlClient.runDeleteQuery(id);
+        return result;
+    }
+
+    isolated resource function get cd_builds(cd_buildTargetType targetType = <>, sql:ParameterizedQuery whereClause = ``, sql:ParameterizedQuery orderByClause = ``, sql:ParameterizedQuery limitClause = ``, sql:ParameterizedQuery groupByClause = ``) returns stream<targetType, persist:Error?> = @java:Method {
+        'class: "io.ballerina.stdlib.persist.sql.datastore.MySQLProcessor",
+        name: "query"
+    } external;
+
+    isolated resource function get cd_builds/[string id](cd_buildTargetType targetType = <>) returns targetType|persist:Error = @java:Method {
+        'class: "io.ballerina.stdlib.persist.sql.datastore.MySQLProcessor",
+        name: "queryOne"
+    } external;
+
+    isolated resource function post cd_builds(cd_buildInsert[] data) returns string[]|persist:Error {
+        psql:SQLClient sqlClient;
+        lock {
+            sqlClient = self.persistClients.get(CD_BUILD);
+        }
+        _ = check sqlClient.runBatchInsertQuery(data);
+        return from cd_buildInsert inserted in data
+            select inserted.id;
+    }
+
+    isolated resource function put cd_builds/[string id](cd_buildUpdate value) returns cd_build|persist:Error {
+        psql:SQLClient sqlClient;
+        lock {
+            sqlClient = self.persistClients.get(CD_BUILD);
+        }
+        _ = check sqlClient.runUpdateQuery(id, value);
+        return self->/cd_builds/[id].get();
+    }
+
+    isolated resource function delete cd_builds/[string id]() returns cd_build|persist:Error {
+        cd_build result = check self->/cd_builds/[id].get();
+        psql:SQLClient sqlClient;
+        lock {
+            sqlClient = self.persistClients.get(CD_BUILD);
         }
         _ = check sqlClient.runDeleteQuery(id);
         return result;
