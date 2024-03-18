@@ -36,11 +36,15 @@ public type customerUpdate record {|
 public type cicd_build record {|
     readonly string id;
     string uuid;
+    string ci_result;
+    string cd_result;
 |};
 
 public type cicd_buildOptionalized record {|
     string id?;
     string uuid?;
+    string ci_result?;
+    string cd_result?;
 |};
 
 public type cicd_buildWithRelations record {|
@@ -55,6 +59,8 @@ public type cicd_buildInsert cicd_build;
 
 public type cicd_buildUpdate record {|
     string uuid?;
+    string ci_result?;
+    string cd_result?;
 |};
 
 public type ci_build record {|

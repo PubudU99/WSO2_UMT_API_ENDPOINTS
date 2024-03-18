@@ -21,6 +21,8 @@ CREATE TABLE `customer` (
 CREATE TABLE `cicd_build` (
 	`id` VARCHAR(191) NOT NULL,
 	`uuid` VARCHAR(191) NOT NULL,
+	`ci_result` VARCHAR(191) NOT NULL,
+	`cd_result` VARCHAR(191) NOT NULL,
 	PRIMARY KEY(`id`)
 );
 

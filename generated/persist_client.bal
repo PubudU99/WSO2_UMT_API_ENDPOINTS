@@ -40,6 +40,8 @@ public isolated client class Client {
             fieldMetadata: {
                 id: {columnName: "id"},
                 uuid: {columnName: "uuid"},
+                ci_result: {columnName: "ci_result"},
+                cd_result: {columnName: "cd_result"},
                 "ci_builds[].id": {relation: {entityName: "ci_builds", refField: "id"}},
                 "ci_builds[].uuid": {relation: {entityName: "ci_builds", refField: "uuid"}},
                 "ci_builds[].ci_build_id": {relation: {entityName: "ci_builds", refField: "ci_build_id"}},
@@ -72,7 +74,9 @@ public isolated client class Client {
                 version: {columnName: "version"},
                 cicd_buildId: {columnName: "cicd_buildId"},
                 "cicd_build.id": {relation: {entityName: "cicd_build", refField: "id"}},
-                "cicd_build.uuid": {relation: {entityName: "cicd_build", refField: "uuid"}}
+                "cicd_build.uuid": {relation: {entityName: "cicd_build", refField: "uuid"}},
+                "cicd_build.ci_result": {relation: {entityName: "cicd_build", refField: "ci_result"}},
+                "cicd_build.cd_result": {relation: {entityName: "cicd_build", refField: "cd_result"}}
             },
             keyFields: ["id"],
             joinMetadata: {cicd_build: {entity: cicd_build, fieldName: "cicd_build", refTable: "cicd_build", refColumns: ["id"], joinColumns: ["cicd_buildId"], 'type: psql:ONE_TO_MANY}}
@@ -88,7 +92,9 @@ public isolated client class Client {
                 customer: {columnName: "customer"},
                 cicd_buildId: {columnName: "cicd_buildId"},
                 "cicd_build.id": {relation: {entityName: "cicd_build", refField: "id"}},
-                "cicd_build.uuid": {relation: {entityName: "cicd_build", refField: "uuid"}}
+                "cicd_build.uuid": {relation: {entityName: "cicd_build", refField: "uuid"}},
+                "cicd_build.ci_result": {relation: {entityName: "cicd_build", refField: "ci_result"}},
+                "cicd_build.cd_result": {relation: {entityName: "cicd_build", refField: "cd_result"}}
             },
             keyFields: ["id"],
             joinMetadata: {cicd_build: {entity: cicd_build, fieldName: "cicd_build", refTable: "cicd_build", refColumns: ["id"], joinColumns: ["cicd_buildId"], 'type: psql:ONE_TO_MANY}}

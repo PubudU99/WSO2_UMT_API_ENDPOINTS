@@ -12,6 +12,8 @@ public type customer record {|
 public type cicd_build record {|
     readonly string id;
     string uuid;
+    string ci_result;
+    string cd_result;
 
     // one-to-many relationship with ci_build
     ci_build[] ci_builds;
