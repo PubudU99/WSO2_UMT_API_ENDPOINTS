@@ -23,7 +23,7 @@ service /cst on endpoint {
 
     // THIS ENDPOINT NEED TO BE REMOVED FROM THE IMPLEMENTATION
     isolated resource function post filtercst(product_regular_update[] product_list) returns customer[]|persist:Error? {
-        sql:ParameterizedQuery where_clause = create_where_clause(product_list);
+        sql:ParameterizedQuery where_clause = create_product_where_clause(product_list);
         stream<customer, persist:Error?> response = sClient->/customers.get(customer, where_clause);
         return check from customer customer in response
             select customer;
@@ -32,22 +32,52 @@ service /cst on endpoint {
     isolated resource function post builds/ci/status() returns error? {
         string[] uuid_list = get_pending_ci_uuid_list();
         update_ci_status(uuid_list);
-        // update_parent_ci_status(uuid_list);
+        update_parent_ci_status(uuid_list);
     }
 
-    isolated resource function post builds/trigger\-cd() {
-
+    isolated resource function post builds/trigger\-cd() returns error? {
+        string[] uuid_list = get_pending_ci_uuid_list();
+        foreach string uuid in uuid_list {
+            map<string> map_product_ci_id = get_map_product_ci_id(uuid);
+            string[] product_list = map_product_ci_id.keys();
+            map<string[]> map_customer_ci_list = create_map_customer_ci_list(product_list, map_product_ci_id);
+            map<string> map_ci_id_state = get_map_ci_id_state(map_product_ci_id);
+            foreach string customer in map_customer_ci_list.keys() {
+                boolean flag = true;
+                string[] build_id_list = <string[]>map_customer_ci_list[customer];
+                foreach string build_id in build_id_list {
+                    if "failed".equalsIgnoreCaseAscii(<string>map_ci_id_state[build_id]) {
+                        flag = false;
+                        // io:println("The image " + image_name + " failed of customer " + customer);
+                        io:println(customer + " customer's CD pipline cancelled");
+                        break;
+                    } else if "inProgress".equalsIgnoreCaseAscii(<string>map_ci_id_state[build_id]) {
+                        io:println("Still building the image of customer " + customer);
+                        break;
+                    }
+                }
+                if flag {
+                    stream<cicd_build, persist:Error?> cicd_response = sClient->/cicd_builds.get(cicd_build, `uuid = ${uuid}`);
+                    var cicd_build_response = check cicd_response.next();
+                    if cicd_build_response !is error? {
+                        json cicd_build_response_json = check cicd_build_response.value.fromJsonWithType();
+                        string cicd_id = check cicd_build_response_json.id;
+                        cicd_build _ = check sClient->/cicd_builds/[cicd_id].put({
+                            cd_result: "started"
+                        });
+                    }
+                    io:println("Start CD pipeline of customer " + customer);
+                    io:println("Create an entry in cd_build table");
+                }
+            }
+        }
     }
-
     isolated resource function post builds/cd/status() {
-
     }
 
-    isolated resource function post builds(product_regular_update[]|product_hotfix_update[] product_list) returns string {
+    isolated resource function post builds(http:Caller caller, product_regular_update[]|product_hotfix_update[] product_list) returns error? {
         string UUID = uuid:createType4AsString();
-        map<int> map_product_ci_id = {};
-        // map<boolean> map_customer_ci_result = {};
-
+        check caller->respond(UUID);
         do {
             cicd_build insertCicdbuild = check insert_cicd_build(UUID);
             http:Client pipelineEndpoint = check pipeline_endpoint(ci_pipeline_id);
@@ -76,27 +106,11 @@ service /cst on endpoint {
                     };
                     ci_buildInsert_list.push(tmp);
 
-                    map_product_ci_id[string:'join("-", product.product_name, product.product_base_version)] = ci_run_id;
                 }
-                // string[] ci_run_id_list = check sClient->/ci_builds.post(ci_buildInsert_list);
             }
         } on fail var e {
             io:println("Error in resource function trigger CI builds.");
             io:println(e);
         }
-
-        return UUID;
-
-        // map<int[]> map_customer_ci_id = create_customer_product_map(product_list, map_product_ci_id);
-
-        // task:JobId ci_run_check_job_id = check task:scheduleJobRecurByFrequency(new ci_run_check(map_product_ci_id, map_customer_ci_id, map_customer_ci_result), 10);
-
-        // while true {
-        //     io:println("unscheduled_flag = ", unschedule_flag);
-        //     if unschedule_flag {
-        //         check task:unscheduleJob(ci_run_check_job_id);
-        //     }
-        //     runtime:sleep(3);
-        // }
     }
 }

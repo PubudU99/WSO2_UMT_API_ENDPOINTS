@@ -1,8 +1,8 @@
 import ballerina/http;
 import ballerina/io;
 import ballerina/persist;
+import ballerina/regex;
 import ballerina/sql;
-import ballerina/task;
 import ballerina/uuid;
 
 boolean unschedule_flag = false;
@@ -37,94 +37,44 @@ type product_hotfix_update record {|
     string u2_level;
 |};
 
-class ci_run_check {
-
-    *task:Job;
-    map<int> map_product_ci_id;
-    map<int[]> map_customer_ci_id;
-    map<boolean> map_customer_ci_result;
-
-    public function execute() {
-        foreach string customer in self.map_customer_ci_id.keys() {
-            self.map_customer_ci_result[customer] = false;
-        }
-        map<string> map_ci_id_state = updated_map_ci_id_state(self.map_product_ci_id.length());
-        foreach string customer in self.map_customer_ci_id.keys() {
-            boolean flag = true;
-            int[] build_id_list = <int[]>self.map_customer_ci_id[customer];
-            foreach int build_id in build_id_list {
-                json run = check get_run_result(build_id.toString());
-                string product = check run.templateParameters.product;
-                string version = check run.templateParameters.version;
-                string image_name = string:'join("-", product, version);
-                if ("completed".equalsIgnoreCaseAscii(map_ci_id_state[build_id.toString()] ?: "")) {
-                    string run_result = check run.result;
-                    if (!run_result.equalsIgnoreCaseAscii("succeeded")) {
-                        self.map_customer_ci_result[customer] = true;
-                        flag = false;
-                        io:println("The image " + image_name + " failed of customer " + customer);
-                        io:println(customer + " customer's CD pipline cancelled");
-                        break;
-                    }
-                } else {
-                    flag = false;
-                    io:println("Still building the image " + image_name + " of customer " + customer);
-                    break;
-                }
-            } on fail var e {
-                io:println("Error in function execute");
-                io:println(e);
-            }
-            if (flag) {
-                self.map_customer_ci_result[customer] = true;
-                io:println("Start CD pipeline of customer " + customer);
-            }
-        }
-
-        unschedule_flag = self.map_customer_ci_result.reduce(function(boolean acc, boolean value) returns boolean {
-            return acc && value;
-        }, true);
-    }
-
-    public isolated function init(map<int> map_product_ci_id, map<int[]> map_customer_ci_id, map<boolean> map_customer_ci_result) {
-        self.map_product_ci_id = map_product_ci_id;
-        self.map_customer_ci_id = map_customer_ci_id;
-        self.map_customer_ci_result = map_customer_ci_result;
-    }
-
-}
-
-isolated function get_run_result(string run_id) returns json|error {
-    http:Client pipelineEndpoint = check pipeline_endpoint(ci_pipeline_id);
-    json response = check pipelineEndpoint->/runs/[run_id].get(api\-version = "7.1-preview.1");
-    return response;
-}
-
-isolated function get_build_status(string pipeline_id) returns json|error {
-    http:Client pipelineEndpoint = check pipeline_endpoint(pipeline_id);
-
-    json response = check pipelineEndpoint->/runs.get(
-        api\-version = "7.1-preview.1"
-    );
-
-    return response.value;
-}
-
-isolated function updated_map_ci_id_state(int product_list_length) returns map<string> {
-    map<string> ci_map = {};
+isolated function get_run_result(string run_id) returns json {
     do {
-        json all_build_status = check get_build_status(ci_pipeline_id);
-        json[] all_build_status_json_arr = check all_build_status.fromJsonWithType();
-        json[] ci_build_status_list = all_build_status_json_arr.slice(0, product_list_length).reverse();
-        foreach json ci_build_status in ci_build_status_list {
-            int run_id = check ci_build_status.id;
-            ci_map[run_id.toString()] = check ci_build_status.state;
-        }
+        http:Client pipelineEndpoint = check pipeline_endpoint(ci_pipeline_id);
+        json response = check pipelineEndpoint->/runs/[run_id].get(api\-version = "7.1-preview.1");
+        return response;
     } on fail var e {
-        io:println("Error in fucntion updated_ci_map");
+        io:println("Error in function get_run_result");
         io:println(e);
     }
-    return ci_map;
+}
+
+isolated function get_map_ci_id_state(map<string> map_product_ci_id) returns map<string> {
+    map<string> map_ci_id_state = {};
+    foreach string product in map_product_ci_id.keys() {
+        string ci_id = <string>map_product_ci_id[product];
+        json run = get_run_result(ci_id);
+        string run_state = check run.state;
+        sql:ParameterizedQuery where_clause = `ci_build_id = ${ci_id}`;
+        stream<ci_build, persist:Error?> response = sClient->/ci_builds.get(ci_build, where_clause);
+        var ci_build_response = check response.next();
+        if ci_build_response !is error? {
+            json ci_build_response_json = check ci_build_response.value.fromJsonWithType();
+            string ci_build_response_json_id = check ci_build_response_json.id;
+            if run_state.equalsIgnoreCaseAscii("completed") {
+                string run_result = check run.result;
+                ci_build _ = check sClient->/ci_builds/[ci_id].put({
+                    ci_status: run_result
+                });
+                map_ci_id_state[ci_id] = run_result;
+            } else {
+                map_ci_id_state[ci_id] = run_state;
+            }
+        }
+    } on fail var e {
+    	io:println("Error in function get_map_ci_id_state");
+    	io:println(e);
+    }
+    return map_ci_id_state;
 }
 
 isolated function initializeClient() returns Client|persist:Error {
@@ -151,7 +101,7 @@ isolated function get_customers_to_insert(customerInsert_copy[] list) returns cu
     return cst_info_list;
 }
 
-isolated function create_where_clause(product_regular_update[] product_list) returns sql:ParameterizedQuery {
+isolated function create_product_where_clause(product_regular_update[] product_list) returns sql:ParameterizedQuery {
     sql:ParameterizedQuery where_clause = ``;
     int i = 0;
     while i < product_list.length() {
@@ -197,39 +147,39 @@ isolated function insert_cicd_build(string UUID) returns cicd_buildInsert|error 
     return tmp;
 }
 
-// isolated function create_customer_product_map(product_hotfix_update[]|product_regular_update[] product_list, map<int> map_product_ci_id) returns map<int[]> {
-//     map<int[]> map_customer_product = {};
-//     // If the product list is type product_regular_update
-//     if product_list is product_regular_update[] {
-//         foreach product_regular_update product in product_list {
-//             // selecting the customers whose deployment has the specific update products
-//             sql:ParameterizedQuery where_clause_product = `(product_name = ${product.product_name} AND product_base_version = ${product.product_base_version})`;
-//             stream<customer, persist:Error?> response = sClient->/customers.get(customer, where_clause_product);
-//             var customer_stream_item = response.next();
-//             int customer_product_ci_id = <int>map_product_ci_id[string:'join("-", product.product_name, product.product_base_version)];
-//             // Iterate on the customer list and maintaining a map to record which builds should be completed for a spcific customer to start tests
-//             while customer_stream_item !is error? {
-//                 json customer = check customer_stream_item.value.fromJsonWithType();
-//                 string customer_name = check customer.customer_key;
-//                 int[] tmp;
-//                 if map_customer_product.hasKey(customer_name) {
-//                     tmp = <int[]>map_customer_product[customer_name];
-//                     tmp.push(customer_product_ci_id);
-//                 } else {
-//                     tmp = [];
-//                     tmp.push(customer_product_ci_id);
-//                 }
-//                 map_customer_product[customer_name] = tmp;
-//                 customer_stream_item = response.next();
-//             } on fail var e {
-//                 io:println("Error in function create_customer_product_map");
-//                 io:println(e);
-//             }
-//         }
-//         io:println(map_customer_product);
-//     }
-//     return map_customer_product;
-// }
+isolated function create_map_customer_ci_list(string[] product_list, map<string> map_product_ci_id) returns map<string[]> {
+    map<string[]> map_customer_product = {};
+    // If the product list is type product_regular_update
+    foreach string product in product_list {
+        // selecting the customers whose deployment has the specific update products
+        string product_name = regex:split(product, "-")[0];
+        string version = regex:split(product, "-")[1];
+        sql:ParameterizedQuery where_clause_product = `(product_name = ${product_name} AND product_base_version = ${version})`;
+        stream<customer, persist:Error?> response = sClient->/customers.get(customer, where_clause_product);
+        var customer_stream_item = response.next();
+        string customer_product_ci_id = <string>map_product_ci_id[product];
+        // Iterate on the customer list and maintaining a map to record which builds should be completed for a spcific customer to start tests
+        while customer_stream_item !is error? {
+            json customer = check customer_stream_item.value.fromJsonWithType();
+            string customer_name = check customer.customer_key;
+            string[] tmp;
+            if map_customer_product.hasKey(customer_name) {
+                tmp = <string[]>map_customer_product[customer_name];
+                tmp.push(customer_product_ci_id);
+            } else {
+                tmp = [];
+                tmp.push(customer_product_ci_id);
+            }
+            map_customer_product[customer_name] = tmp;
+            customer_stream_item = response.next();
+        } on fail var e {
+            io:println("Error in function create_customer_product_map");
+            io:println(e);
+        }
+    }
+    io:println(map_customer_product);
+    return map_customer_product;
+}
 
 isolated function get_pending_ci_uuid_list() returns string[] {
     sql:ParameterizedQuery where_clause = `ci_result = "pending"`;
@@ -275,10 +225,9 @@ isolated function update_ci_status(string[] uuid_list) {
             } else {
                 run_result = check run_response.state;
             }
-            ci_buildUpdate tmp = {
+            ci_build _ = check sClient->/ci_builds/[ci_id].put({
                 ci_status: run_result
-            };
-            ci_build _ = check sClient->/ci_builds/[ci_id].put(tmp);
+            });
             ci_build_response = response.next();
         } on fail var e {
             io:println("Error in function get_uuid_list ");
@@ -288,4 +237,57 @@ isolated function update_ci_status(string[] uuid_list) {
         io:println("Error in function update_ci_status");
         io:println(e);
     }
+}
+
+isolated function update_parent_ci_status(string[] uuid_list) {
+    do {
+        foreach string uuid in uuid_list {
+            sql:ParameterizedQuery where_clause = `uuid = ${uuid}`;
+            stream<ci_build, persist:Error?> response = sClient->/ci_builds.get(ci_build, where_clause);
+            var ci_build_response = response.next();
+            boolean flag = true;
+            while ci_build_response !is error? {
+                json ci_build_response_json = check ci_build_response.value.fromJsonWithType();
+                string ci_build_status = check ci_build_response_json.ci_status;
+                if (!ci_build_status.equalsIgnoreCaseAscii("succeeded")) {
+                    flag = false;
+                }
+                ci_build_response = response.next();
+            }
+            if flag {
+                stream<cicd_build, persist:Error?> cicd_response = sClient->/cicd_builds.get(cicd_build, `uuid = ${uuid}`);
+                var cicd_build_response = check cicd_response.next();
+                if cicd_build_response !is error? {
+                    json cicd_build_response_json = check cicd_build_response.value.fromJsonWithType();
+                    string cicd_id = check cicd_build_response_json.id;
+                    cicd_build _ = check sClient->/cicd_builds/[cicd_id].put({
+                        ci_result: "succeeded"
+                    });
+                }
+
+            }
+        }
+    } on fail var e {
+        io:println("Error in function update_parent_ci_status");
+        io:println(e);
+    }
+}
+
+isolated function get_map_product_ci_id(string uuid) returns map<string> {
+    sql:ParameterizedQuery where_clause = `uuid = ${uuid}`;
+    stream<ci_build, persist:Error?> response = sClient->/ci_builds.get(ci_build, where_clause);
+    map<string> map_product_ci_id = {};
+    var ci_build_repsonse = response.next();
+    while ci_build_repsonse !is error? {
+        json ci_build_repsonse_json = check ci_build_repsonse.value.fromJsonWithType();
+        string product_name = check ci_build_repsonse_json.product;
+        string version = check ci_build_repsonse_json.version;
+        string ci_build_id = check ci_build_repsonse_json.ci_build_id;
+        map_product_ci_id[string:'join("-", product_name, version)] = ci_build_id;
+        ci_build_repsonse = response.next();
+    } on fail var e {
+        io:println("Error in function get_map_product_ci_id");
+        io:println(e);
+    }
+    return map_product_ci_id;
 }
