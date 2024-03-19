@@ -48,11 +48,11 @@ isolated function get_run_result(string run_id) returns json {
     }
 }
 
-isolated function get_map_ci_id_state(map<string> map_product_ci_id) returns map<string> {
+isolated function get_map_ci_id_state(map<int> map_product_ci_id) returns map<string> {
     map<string> map_ci_id_state = {};
     foreach string product in map_product_ci_id.keys() {
-        string ci_id = <string>map_product_ci_id[product];
-        json run = get_run_result(ci_id);
+        int ci_id = <int>map_product_ci_id[product];
+        json run = get_run_result(ci_id.toString());
         string run_state = check run.state;
         sql:ParameterizedQuery where_clause = `ci_build_id = ${ci_id}`;
         stream<ci_build, persist:Error?> response = sClient->/ci_builds.get(ci_build, where_clause);
@@ -62,12 +62,12 @@ isolated function get_map_ci_id_state(map<string> map_product_ci_id) returns map
             string ci_build_response_json_id = check ci_build_response_json.id;
             if run_state.equalsIgnoreCaseAscii("completed") {
                 string run_result = check run.result;
-                ci_build _ = check sClient->/ci_builds/[ci_id].put({
+                ci_build _ = check sClient->/ci_builds/[ci_build_response_json_id].put({
                     ci_status: run_result
                 });
-                map_ci_id_state[ci_id] = run_result;
+                map_ci_id_state[ci_id.toString()] = run_result;
             } else {
-                map_ci_id_state[ci_id] = run_state;
+                map_ci_id_state[ci_id.toString()] = run_state;
             }
         }
     } on fail var e {
@@ -147,7 +147,7 @@ isolated function insert_cicd_build(string UUID) returns cicd_buildInsert|error 
     return tmp;
 }
 
-isolated function create_map_customer_ci_list(string[] product_list, map<string> map_product_ci_id) returns map<string[]> {
+isolated function create_map_customer_ci_list(string[] product_list, map<int> map_product_ci_id) returns map<string[]> {
     map<string[]> map_customer_product = {};
     // If the product list is type product_regular_update
     foreach string product in product_list {
@@ -157,7 +157,7 @@ isolated function create_map_customer_ci_list(string[] product_list, map<string>
         sql:ParameterizedQuery where_clause_product = `(product_name = ${product_name} AND product_base_version = ${version})`;
         stream<customer, persist:Error?> response = sClient->/customers.get(customer, where_clause_product);
         var customer_stream_item = response.next();
-        string customer_product_ci_id = <string>map_product_ci_id[product];
+        int customer_product_ci_id = <int>map_product_ci_id[product];
         // Iterate on the customer list and maintaining a map to record which builds should be completed for a spcific customer to start tests
         while customer_stream_item !is error? {
             json customer = check customer_stream_item.value.fromJsonWithType();
@@ -165,10 +165,10 @@ isolated function create_map_customer_ci_list(string[] product_list, map<string>
             string[] tmp;
             if map_customer_product.hasKey(customer_name) {
                 tmp = <string[]>map_customer_product[customer_name];
-                tmp.push(customer_product_ci_id);
+                tmp.push(customer_product_ci_id.toString());
             } else {
                 tmp = [];
-                tmp.push(customer_product_ci_id);
+                tmp.push(customer_product_ci_id.toString());
             }
             map_customer_product[customer_name] = tmp;
             customer_stream_item = response.next();
@@ -184,7 +184,7 @@ isolated function create_map_customer_ci_list(string[] product_list, map<string>
 isolated function get_pending_ci_uuid_list() returns string[] {
     sql:ParameterizedQuery where_clause = `ci_result = "pending"`;
     string[] uuid_list = [];
-    stream<customer, persist:Error?> response = sClient->/customers.get(customer, where_clause);
+    stream<cicd_build, persist:Error?> response = sClient->/cicd_builds.get(cicd_build, where_clause);
     var uuid_response = response.next();
     while uuid_response !is error? {
         json uuid_record = check uuid_response.value.fromJsonWithType();
@@ -192,7 +192,7 @@ isolated function get_pending_ci_uuid_list() returns string[] {
         uuid_list.push(uuid);
         uuid_response = response.next();
     } on fail var e {
-        io:println("Error in function get_uuid_list ");
+        io:println("Error in function get_pending_ci_uuid_list ");
         io:println(e);
     }
     return uuid_list;
@@ -215,7 +215,7 @@ isolated function update_ci_status(string[] uuid_list) {
         var ci_build_response = response.next();
         while ci_build_response !is error? {
             json ci_build_response_json = check ci_build_response.value.fromJsonWithType();
-            string ci_build_id = check ci_build_response_json.ci_build_id;
+            int ci_build_id = check ci_build_response_json.ci_build_id;
             string ci_id = check ci_build_response_json.id;
             json run_response = check pipelineEndpoint->/runs/[ci_build_id].get(api\-version = "7.1-preview.1");
             string run_state = check run_response.state;
@@ -273,18 +273,19 @@ isolated function update_parent_ci_status(string[] uuid_list) {
     }
 }
 
-isolated function get_map_product_ci_id(string uuid) returns map<string> {
+isolated function get_map_product_ci_id(string uuid) returns map<int> {
     sql:ParameterizedQuery where_clause = `uuid = ${uuid}`;
     stream<ci_build, persist:Error?> response = sClient->/ci_builds.get(ci_build, where_clause);
-    map<string> map_product_ci_id = {};
+    map<int> map_product_ci_id = {};
     var ci_build_repsonse = response.next();
     while ci_build_repsonse !is error? {
         json ci_build_repsonse_json = check ci_build_repsonse.value.fromJsonWithType();
         string product_name = check ci_build_repsonse_json.product;
         string version = check ci_build_repsonse_json.version;
-        string ci_build_id = check ci_build_repsonse_json.ci_build_id;
+        int ci_build_id = check ci_build_repsonse_json.ci_build_id;
         map_product_ci_id[string:'join("-", product_name, version)] = ci_build_id;
         ci_build_repsonse = response.next();
+
     } on fail var e {
         io:println("Error in function get_map_product_ci_id");
         io:println(e);
