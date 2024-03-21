@@ -36,6 +36,8 @@ CREATE TABLE `ci_build` (
 	PRIMARY KEY(`id`)
 );
 
+
+
 CREATE TABLE `cd_build` (
 	`id` VARCHAR(191) NOT NULL,
 	`cd_build_id` VARCHAR(191) NOT NULL,
@@ -45,3 +47,8 @@ CREATE TABLE `cd_build` (
 	FOREIGN KEY(`cicd_buildId`) REFERENCES `cicd_build`(`id`),
 	PRIMARY KEY(`id`)
 );
+
+
+UPDATE `ci_build` SET  `ci_status` =  "Failed"  WHERE  `ci_build`.`id` =  "46125161-9904-4270-b098-a5135eee3219"
+
+UPDATE `ci_build` SET  `ci_status` =  "Failed"  WHERE  `ci_build`.`id` =  "3425b797-9a49-4644-83d9-a5e8b746696a"

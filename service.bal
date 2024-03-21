@@ -1,6 +1,5 @@
 import ballerina/http;
 import ballerina/io;
-import ballerina/lang.runtime;
 import ballerina/persist;
 import ballerina/uuid;
 
@@ -42,7 +41,7 @@ service /cst on endpoint {
                     int ci_run_id = check response.id;
                     string ci_run_state = check response.state;
                     ci_buildInsert tmp = {
-                        id: UUID,
+                        id: uuid:createType4AsString(),
                         ci_build_id: ci_run_id,
                         ci_status: ci_run_state,
                         product: product.product_name,
@@ -52,13 +51,6 @@ service /cst on endpoint {
                     ci_buildInsert_list.push(tmp);
                 }
                 string[] _ = check sClient->/ci_builds.post(ci_buildInsert_list);
-            }
-            while true {
-                io:println("Schedule running");
-                schedule_ci();
-                trigger_cd();
-                runtime:sleep(15);
-                io:println("Schedule running");
             }
         } on fail var e {
             io:println("Error in resource function trigger CI builds.");
@@ -85,7 +77,6 @@ service /cst on endpoint {
                 foreach string build_id in build_id_list {
                     if "failed".equalsIgnoreCaseAscii(<string>map_ci_id_state[build_id]) {
                         flag = false;
-                        // io:println("The image " + image_name + " failed of customer " + customer);
                         io:println(customer + " customer's CD pipline cancelled");
                         break;
                     } else if "inProgress".equalsIgnoreCaseAscii(<string>map_ci_id_state[build_id]) {
@@ -101,13 +92,8 @@ service /cst on endpoint {
             }
         }
     }
-    isolated resource function post builds/cd/status() {
-        // update_inProgress_cd_builds();
-        // stream<cd_build, persist:Error?> response = sClient->/cd_builds.get(cd_build, `cd_status = "inProgress"`);
-        // var cd_build_stream_item = response.next();
-        // while cd_build_stream_item !is error? {
-        //     cd_build_stream_item_json
-        // }
+    isolated resource function post builds/cd/status() returns error? {
+        update_inProgress_cd_builds();
     }
 
     isolated resource function post builds/[string id]/re\-trigger() {

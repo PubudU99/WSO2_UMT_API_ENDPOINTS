@@ -59,15 +59,16 @@ isolated function get_map_ci_id_state(map<int> map_product_ci_id) returns map<st
         var ci_build_response = check response.next();
         if ci_build_response !is error? {
             json ci_build_response_json = check ci_build_response.value.fromJsonWithType();
-            string ci_build_response_json_id = check ci_build_response_json.id;
-            if run_state.equalsIgnoreCaseAscii("completed") {
+            string ci_build_record_id = check ci_build_response_json.id;
+            string ci_build_record_status = check ci_build_response_json.ci_status;
+            if (!(ci_build_record_status.equalsIgnoreCaseAscii("failed") || ci_build_record_status.equalsIgnoreCaseAscii("succeeded")) && run_state.equalsIgnoreCaseAscii("completed")) {
                 string run_result = check run.result;
-                ci_build _ = check sClient->/ci_builds/[ci_build_response_json_id].put({
+                io:println(ci_build_record_id);
+                io:println(run_result);
+                ci_build _ = check sClient->/ci_builds/[ci_build_record_id].put({
                     ci_status: run_result
                 });
                 map_ci_id_state[ci_id.toString()] = run_result;
-            } else {
-                map_ci_id_state[ci_id.toString()] = run_state;
             }
         }
     } on fail var e {
@@ -333,5 +334,26 @@ isolated function insert_new_cd_builds(string id, string customer) {
         }
         io:println("Start CD pipeline of customer " + customer);
         io:println("Create an entry in cd_build table");
+    }
+}
+
+isolated function update_inProgress_cd_builds() {
+    stream<cd_build, persist:Error?> response = sClient->/cd_builds.get(cd_build, `cd_status = "inProgress"`);
+    var cd_build_stream_item = response.next();
+    while cd_build_stream_item !is error? {
+        json cd_build_stream_item_json = check cd_build_stream_item.value.fromJsonWithType();
+        string cd_build_id = check cd_build_stream_item_json.cd_build_id;
+        string cd_build_record_id = check cd_build_stream_item_json.id;
+        json run = get_run_result(cd_build_id);
+        string run_state = check run.state;
+        if run_state.equalsIgnoreCaseAscii("completed") {
+            string run_result = check run.result;
+            ci_build _ = check sClient->/ci_builds/[cd_build_record_id].put({
+                ci_status: run_result
+            });
+        }
+    } on fail var e {
+        io:println("Error is function update_inProgress_cd_builds");
+        io:println(e);
     }
 }
