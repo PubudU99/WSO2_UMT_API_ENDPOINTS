@@ -20,7 +20,6 @@ CREATE TABLE `customer` (
 
 CREATE TABLE `cicd_build` (
 	`id` VARCHAR(191) NOT NULL,
-	`uuid` VARCHAR(191) NOT NULL,
 	`ci_result` VARCHAR(191) NOT NULL,
 	`cd_result` VARCHAR(191) NOT NULL,
 	PRIMARY KEY(`id`)
@@ -28,7 +27,6 @@ CREATE TABLE `cicd_build` (
 
 CREATE TABLE `ci_build` (
 	`id` VARCHAR(191) NOT NULL,
-	`uuid` VARCHAR(191) NOT NULL,
 	`ci_build_id` INT NOT NULL,
 	`ci_status` VARCHAR(191) NOT NULL,
 	`product` VARCHAR(191) NOT NULL,
@@ -40,7 +38,6 @@ CREATE TABLE `ci_build` (
 
 CREATE TABLE `cd_build` (
 	`id` VARCHAR(191) NOT NULL,
-	`uuid` VARCHAR(191) NOT NULL,
 	`cd_build_id` VARCHAR(191) NOT NULL,
 	`cd_status` VARCHAR(191) NOT NULL,
 	`customer` VARCHAR(191) NOT NULL,

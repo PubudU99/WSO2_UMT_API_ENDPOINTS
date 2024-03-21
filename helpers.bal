@@ -16,7 +16,7 @@ type customerInsert_copy record {|
 |};
 
 type ci_build_copy record {|
-    string uuid;
+    string id;
     string ci_build_id;
     string ci_status;
     string product;
@@ -71,8 +71,8 @@ isolated function get_map_ci_id_state(map<int> map_product_ci_id) returns map<st
             }
         }
     } on fail var e {
-    	io:println("Error in function get_map_ci_id_state");
-    	io:println(e);
+        io:println("Error in function get_map_ci_id_state");
+        io:println(e);
     }
     return map_ci_id_state;
 }
@@ -130,12 +130,11 @@ isolated function pipeline_endpoint(string pipeline_id) returns http:Client|erro
     return clientEndpoint;
 }
 
-isolated function insert_cicd_build(string UUID) returns cicd_buildInsert|error {
+isolated function insert_cicd_build(string uuid) returns cicd_buildInsert|error {
     cicd_buildInsert[] cicd_buildInsert_list = [];
 
     cicd_buildInsert tmp = {
-        id: uuid:createType4AsString(),
-        uuid: UUID,
+        id: uuid,
         ci_result: "pending",
         cd_result: "pending"
     };
@@ -181,33 +180,33 @@ isolated function create_map_customer_ci_list(string[] product_list, map<int> ma
     return map_customer_product;
 }
 
-isolated function get_pending_ci_uuid_list() returns string[] {
+isolated function get_pending_ci_id_list() returns string[] {
     sql:ParameterizedQuery where_clause = `ci_result = "pending"`;
-    string[] uuid_list = [];
+    string[] id_list = [];
     stream<cicd_build, persist:Error?> response = sClient->/cicd_builds.get(cicd_build, where_clause);
-    var uuid_response = response.next();
-    while uuid_response !is error? {
-        json uuid_record = check uuid_response.value.fromJsonWithType();
-        string uuid = check uuid_record.uuid;
-        uuid_list.push(uuid);
-        uuid_response = response.next();
+    var id_response = response.next();
+    while id_response !is error? {
+        json id_record = check id_response.value.fromJsonWithType();
+        string id = check id_record.id;
+        id_list.push(id);
+        id_response = response.next();
     } on fail var e {
-        io:println("Error in function get_pending_ci_uuid_list ");
+        io:println("Error in function get_pending_ci_id_list ");
         io:println(e);
     }
-    return uuid_list;
+    return id_list;
 }
 
-isolated function update_ci_status(string[] uuid_list) {
+isolated function update_ci_status(string[] id_list) {
     do {
         http:Client pipelineEndpoint = check pipeline_endpoint(ci_pipeline_id);
         sql:ParameterizedQuery where_clause = ``;
         int i = 0;
-        foreach string uuid in uuid_list {
-            if (i == uuid_list.length() - 1) {
-                where_clause = sql:queryConcat(where_clause, `uuid = ${uuid}`);
+        foreach string id in id_list {
+            if (i == id_list.length() - 1) {
+                where_clause = sql:queryConcat(where_clause, `cicd_buildId = ${id}`);
             } else {
-                where_clause = sql:queryConcat(where_clause, `uuid = ${uuid} OR `);
+                where_clause = sql:queryConcat(where_clause, `cicd_buildId = ${id} OR `);
             }
             i += 1;
         }
@@ -230,7 +229,7 @@ isolated function update_ci_status(string[] uuid_list) {
             });
             ci_build_response = response.next();
         } on fail var e {
-            io:println("Error in function get_uuid_list ");
+            io:println("Error in function get_id_list ");
             io:println(e);
         }
     } on fail var e {
@@ -239,10 +238,10 @@ isolated function update_ci_status(string[] uuid_list) {
     }
 }
 
-isolated function update_parent_ci_status(string[] uuid_list) {
+isolated function update_parent_ci_status(string[] id_list) {
     do {
-        foreach string uuid in uuid_list {
-            sql:ParameterizedQuery where_clause = `uuid = ${uuid}`;
+        foreach string id in id_list {
+            sql:ParameterizedQuery where_clause = `cicd_buildId = ${id}`;
             stream<ci_build, persist:Error?> response = sClient->/ci_builds.get(ci_build, where_clause);
             var ci_build_response = response.next();
             boolean flag = true;
@@ -255,7 +254,7 @@ isolated function update_parent_ci_status(string[] uuid_list) {
                 ci_build_response = response.next();
             }
             if flag {
-                stream<cicd_build, persist:Error?> cicd_response = sClient->/cicd_builds.get(cicd_build, `uuid = ${uuid}`);
+                stream<cicd_build, persist:Error?> cicd_response = sClient->/cicd_builds.get(cicd_build, `id = ${id}`);
                 var cicd_build_response = check cicd_response.next();
                 if cicd_build_response !is error? {
                     json cicd_build_response_json = check cicd_build_response.value.fromJsonWithType();
@@ -273,8 +272,8 @@ isolated function update_parent_ci_status(string[] uuid_list) {
     }
 }
 
-isolated function get_map_product_ci_id(string uuid) returns map<int> {
-    sql:ParameterizedQuery where_clause = `uuid = ${uuid}`;
+isolated function get_map_product_ci_id(string id) returns map<int> {
+    sql:ParameterizedQuery where_clause = `cicd_buildId = ${id}`;
     stream<ci_build, persist:Error?> response = sClient->/ci_builds.get(ci_build, where_clause);
     map<int> map_product_ci_id = {};
     var ci_build_repsonse = response.next();
@@ -291,4 +290,48 @@ isolated function get_map_product_ci_id(string uuid) returns map<int> {
         io:println(e);
     }
     return map_product_ci_id;
+}
+
+isolated function update_cd_result_cicd_table(string id) {
+    do {
+        stream<cicd_build, persist:Error?> cicd_response = sClient->/cicd_builds.get(cicd_build, `id = ${id}`);
+        var cicd_build_response = check cicd_response.next();
+        if cicd_build_response !is error? {
+            json cicd_build_response_json = check cicd_build_response.value.fromJsonWithType();
+            string cicd_id = check cicd_build_response_json.id;
+            string cicd_cd_result = check cicd_build_response_json.cd_result;
+            if cicd_cd_result.equalsIgnoreCaseAscii("pending") {
+                cicd_build _ = check sClient->/cicd_builds/[cicd_id].put({
+                    cd_result: "started"
+                });
+            }
+        }
+    } on fail var e {
+        io:println("Error is function update_cd_result_cicd_table");
+        io:println(e);
+    }
+}
+
+isolated function insert_new_cd_builds(string id, string customer) {
+    stream<cd_build, persist:Error?> cd_response = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${id} and customer = ${customer}`);
+    var cd_build_response = cd_response.next();
+    if cd_build_response is error? {
+        cd_buildInsert[] tmp = [
+            {
+                id: uuid:createType4AsString(),
+                cd_build_id: "",
+                cd_status: "inProgress",
+                customer: customer,
+                cicd_buildId: id
+            }
+        ];
+        do {
+            string[] _ = check sClient->/cd_builds.post(tmp);
+        } on fail var e {
+            io:println("Error is function update_cd_result_cicd_table");
+            io:println(e);
+        }
+        io:println("Start CD pipeline of customer " + customer);
+        io:println("Create an entry in cd_build table");
+    }
 }

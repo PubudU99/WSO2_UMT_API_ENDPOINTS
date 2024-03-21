@@ -1,8 +1,8 @@
 import ballerina/http;
 import ballerina/io;
+import ballerina/lang.runtime;
 import ballerina/persist;
 import ballerina/uuid;
-import ballerina/lang.runtime;
 
 listener http:Listener endpoint = new (5000);
 
@@ -15,7 +15,7 @@ service /cst on endpoint {
         return sClient->/customers.post(cst_info_list);
     }
 
-    isolated resource function get customer() returns customer[]|error? {
+    isolated resource function get customer() returns customer[]|persist:Error {
         stream<customer, persist:Error?> response = sClient->/customers;
         return check from customer customer in response
             select customer;
@@ -42,8 +42,7 @@ service /cst on endpoint {
                     int ci_run_id = check response.id;
                     string ci_run_state = check response.state;
                     ci_buildInsert tmp = {
-                        id: uuid:createType4AsString(),
-                        uuid: UUID,
+                        id: UUID,
                         ci_build_id: ci_run_id,
                         ci_status: ci_run_state,
                         product: product.product_name,
@@ -54,12 +53,12 @@ service /cst on endpoint {
                 }
                 string[] _ = check sClient->/ci_builds.post(ci_buildInsert_list);
             }
-
             while true {
                 io:println("Schedule running");
                 schedule_ci();
                 trigger_cd();
-                runtime:sleep(3);
+                runtime:sleep(15);
+                io:println("Schedule running");
             }
         } on fail var e {
             io:println("Error in resource function trigger CI builds.");
@@ -67,16 +66,16 @@ service /cst on endpoint {
         }
     }
 
-    isolated resource function post builds/ci/status() returns error? {
-        string[] uuid_list = get_pending_ci_uuid_list();
-        update_ci_status(uuid_list);
-        update_parent_ci_status(uuid_list);
+    isolated resource function post builds/ci/status() returns error? { //scheduen 1
+        string[] pending_ci_id_list = get_pending_ci_id_list();
+        update_ci_status(pending_ci_id_list);
+        update_parent_ci_status(pending_ci_id_list);
     }
 
-    isolated resource function post builds/trigger\-cd() returns error? {
-        string[] uuid_list = get_pending_ci_uuid_list();
-        foreach string uuid in uuid_list {
-            map<int> map_product_ci_id = get_map_product_ci_id(uuid);
+    isolated resource function post builds/cd/trigger() returns error? {
+        string[] pending_ci_id_list = get_pending_ci_id_list();
+        foreach string id in pending_ci_id_list {
+            map<int> map_product_ci_id = get_map_product_ci_id(id);
             string[] product_list = map_product_ci_id.keys();
             map<string[]> map_customer_ci_list = create_map_customer_ci_list(product_list, map_product_ci_id);
             map<string> map_ci_id_state = get_map_ci_id_state(map_product_ci_id);
@@ -96,22 +95,22 @@ service /cst on endpoint {
                     }
                 }
                 if flag {
-                    stream<cicd_build, persist:Error?> cicd_response = sClient->/cicd_builds.get(cicd_build, `uuid = ${uuid}`);
-                    var cicd_build_response = check cicd_response.next();
-                    if cicd_build_response !is error? {
-                        json cicd_build_response_json = check cicd_build_response.value.fromJsonWithType();
-                        string cicd_id = check cicd_build_response_json.id;
-                        cicd_build _ = check sClient->/cicd_builds/[cicd_id].put({
-                            cd_result: "started"
-                        });
-                    }
-                    io:println("Start CD pipeline of customer " + customer);
-                    io:println("Create an entry in cd_build table");
+                    update_cd_result_cicd_table(id);
+                    insert_new_cd_builds(id, customer);
                 }
             }
         }
     }
     isolated resource function post builds/cd/status() {
+        // update_inProgress_cd_builds();
+        // stream<cd_build, persist:Error?> response = sClient->/cd_builds.get(cd_build, `cd_status = "inProgress"`);
+        // var cd_build_stream_item = response.next();
+        // while cd_build_stream_item !is error? {
+        //     cd_build_stream_item_json
+        // }
+    }
+
+    isolated resource function post builds/[string id]/re\-trigger() {
+
     }
 }
-

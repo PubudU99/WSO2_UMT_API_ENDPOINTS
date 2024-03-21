@@ -11,7 +11,6 @@ public type customer record {|
 
 public type cicd_build record {|
     readonly string id;
-    string uuid;
     string ci_result;
     string cd_result;
 
@@ -24,7 +23,6 @@ public type cicd_build record {|
 
 public type ci_build record {|
     readonly string id;
-    string uuid;
     int ci_build_id;
     string ci_status;
     string product;
@@ -36,7 +34,6 @@ public type ci_build record {|
 
 public type cd_build record {|
     readonly string id;
-    string uuid;
     string cd_build_id;
     string cd_status;
     string customer;
