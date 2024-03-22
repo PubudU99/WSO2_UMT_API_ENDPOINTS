@@ -25,19 +25,11 @@ service /cst on endpoint {
         check caller->respond(UUID);
         do {
             cicd_build insertCicdbuild = check insert_cicd_build(UUID);
-            http:Client pipelineEndpoint = check pipeline_endpoint(ci_pipeline_id);
             ci_buildInsert[] ci_buildInsert_list = [];
 
             if product_list is product_regular_update[] {
                 foreach product_regular_update product in product_list {
-                    json response = check pipelineEndpoint->/runs.post({
-                            templateParameters: {
-                                product: product.product_name,
-                                version: product.product_base_version
-                            }
-                        },
-                        api\-version = "7.1-preview.1"
-                    );
+                    json response = trigger_az_endpoint(product.product_name, product.product_base_version);
                     int ci_run_id = check response.id;
                     string ci_run_state = check response.state;
                     ci_buildInsert tmp = {
@@ -59,15 +51,15 @@ service /cst on endpoint {
     }
 
     isolated resource function post builds/ci/status() returns error? { //scheduen 1
-        string[] pending_ci_id_list = get_pending_ci_id_list();
-        update_ci_status(pending_ci_id_list);
-        update_parent_ci_status(pending_ci_id_list);
+        string[] pending_ci_cicd_id_list = get_pending_ci_cicd_id_list();
+        update_ci_status(pending_ci_cicd_id_list);
+        update_ci_status_cicd_table(pending_ci_cicd_id_list);
     }
 
     isolated resource function post builds/cd/trigger() returns error? {
-        string[] pending_ci_id_list = get_pending_ci_id_list();
-        foreach string id in pending_ci_id_list {
-            map<int> map_product_ci_id = get_map_product_ci_id(id);
+        string[] pending_ci_cicd_id_list = get_pending_ci_cicd_id_list();
+        foreach string cicd_id in pending_ci_cicd_id_list {
+            map<int> map_product_ci_id = get_map_product_ci_id(cicd_id);
             string[] product_list = map_product_ci_id.keys();
             map<string[]> map_customer_ci_list = create_map_customer_ci_list(product_list, map_product_ci_id);
             map<string> map_ci_id_state = get_map_ci_id_state(map_product_ci_id);
@@ -75,19 +67,21 @@ service /cst on endpoint {
                 boolean flag = true;
                 string[] build_id_list = <string[]>map_customer_ci_list[customer];
                 foreach string build_id in build_id_list {
-                    if "failed".equalsIgnoreCaseAscii(<string>map_ci_id_state[build_id]) {
+                    if "failed".equalsIgnoreCaseAscii(map_ci_id_state.get(build_id)) {
+                        io:println("failed");
                         flag = false;
                         io:println(customer + " customer's CD pipline cancelled");
                         break;
-                    } else if "inProgress".equalsIgnoreCaseAscii(<string>map_ci_id_state[build_id]) {
+                    } else if "inProgress".equalsIgnoreCaseAscii(map_ci_id_state.get(build_id)) {
+                        io:println("inProgress");
                         flag = false;
                         io:println("Still building the image of customer " + customer);
                         break;
                     }
                 }
                 if flag {
-                    update_cd_result_cicd_table(id);
-                    insert_new_cd_builds(id, customer);
+                    update_cd_result_cicd_table(cicd_id);
+                    insert_new_cd_builds(cicd_id, customer);
                 }
             }
         }
@@ -96,7 +90,9 @@ service /cst on endpoint {
         update_inProgress_cd_builds();
     }
 
-    isolated resource function post builds/[string id]/re\-trigger() {
-
+    isolated resource function post builds/[string cicd_id]/re\-trigger() {
+        retrigger_failed_ci_builds(cicd_id);
+        update_ci_cd_status_on_retrigger_ci_builds(cicd_id);
+        delete_failed_cd_builds(cicd_id);
     }
 }

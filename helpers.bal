@@ -48,10 +48,28 @@ isolated function get_run_result(string run_id) returns json {
     }
 }
 
+isolated function trigger_az_endpoint(string product, string version) returns json {
+    do {
+        http:Client pipelineEndpoint = check pipeline_endpoint(ci_pipeline_id);
+        json response = check pipelineEndpoint->/runs.post({
+                templateParameters: {
+                    product: product,
+                    version: version
+                }
+            },
+            api\-version = "7.1-preview.1"
+        );
+        return response;
+    } on fail var e {
+        io:println("Error in function trigger_az_endpoint");
+        io:println(e);
+    }
+}
+
 isolated function get_map_ci_id_state(map<int> map_product_ci_id) returns map<string> {
     map<string> map_ci_id_state = {};
     foreach string product in map_product_ci_id.keys() {
-        int ci_id = <int>map_product_ci_id[product];
+        int ci_id = map_product_ci_id.get(product);
         json run = get_run_result(ci_id.toString());
         string run_state = check run.state;
         sql:ParameterizedQuery where_clause = `ci_build_id = ${ci_id}`;
@@ -60,15 +78,14 @@ isolated function get_map_ci_id_state(map<int> map_product_ci_id) returns map<st
         if ci_build_response !is error? {
             json ci_build_response_json = check ci_build_response.value.fromJsonWithType();
             string ci_build_record_id = check ci_build_response_json.id;
-            string ci_build_record_status = check ci_build_response_json.ci_status;
-            if (!(ci_build_record_status.equalsIgnoreCaseAscii("failed") || ci_build_record_status.equalsIgnoreCaseAscii("succeeded")) && run_state.equalsIgnoreCaseAscii("completed")) {
+            if run_state.equalsIgnoreCaseAscii("completed") {
                 string run_result = check run.result;
-                io:println(ci_build_record_id);
-                io:println(run_result);
                 ci_build _ = check sClient->/ci_builds/[ci_build_record_id].put({
                     ci_status: run_result
                 });
                 map_ci_id_state[ci_id.toString()] = run_result;
+            } else {
+                map_ci_id_state[ci_id.toString()] = run_state;
             }
         }
     } on fail var e {
@@ -136,7 +153,7 @@ isolated function insert_cicd_build(string uuid) returns cicd_buildInsert|error 
 
     cicd_buildInsert tmp = {
         id: uuid,
-        ci_result: "pending",
+        ci_result: "inProgress",
         cd_result: "pending"
     };
 
@@ -164,7 +181,7 @@ isolated function create_map_customer_ci_list(string[] product_list, map<int> ma
             string customer_name = check customer.customer_key;
             string[] tmp;
             if map_customer_product.hasKey(customer_name) {
-                tmp = <string[]>map_customer_product[customer_name];
+                tmp = map_customer_product.get(customer_name);
                 tmp.push(customer_product_ci_id.toString());
             } else {
                 tmp = [];
@@ -177,11 +194,10 @@ isolated function create_map_customer_ci_list(string[] product_list, map<int> ma
             io:println(e);
         }
     }
-    io:println(map_customer_product);
     return map_customer_product;
 }
 
-isolated function get_pending_ci_id_list() returns string[] {
+isolated function get_pending_ci_cicd_id_list() returns string[] {
     sql:ParameterizedQuery where_clause = `ci_result = "pending"`;
     string[] id_list = [];
     stream<cicd_build, persist:Error?> response = sClient->/cicd_builds.get(cicd_build, where_clause);
@@ -239,32 +255,39 @@ isolated function update_ci_status(string[] id_list) {
     }
 }
 
-isolated function update_parent_ci_status(string[] id_list) {
+isolated function update_ci_status_cicd_table(string[] id_list) {
     do {
         foreach string id in id_list {
             sql:ParameterizedQuery where_clause = `cicd_buildId = ${id}`;
             stream<ci_build, persist:Error?> response = sClient->/ci_builds.get(ci_build, where_clause);
             var ci_build_response = response.next();
-            boolean flag = true;
+            boolean all_succeeded_flag = true;
+            boolean all_completed_flag = true;
             while ci_build_response !is error? {
                 json ci_build_response_json = check ci_build_response.value.fromJsonWithType();
                 string ci_build_status = check ci_build_response_json.ci_status;
+                if (!ci_build_status.equalsIgnoreCaseAscii("succeeded") && !ci_build_status.equalsIgnoreCaseAscii("failed")) {
+                    all_completed_flag = false;
+                }
                 if (!ci_build_status.equalsIgnoreCaseAscii("succeeded")) {
-                    flag = false;
+                    all_succeeded_flag = false;
                 }
                 ci_build_response = response.next();
             }
-            if flag {
-                stream<cicd_build, persist:Error?> cicd_response = sClient->/cicd_builds.get(cicd_build, `id = ${id}`);
-                var cicd_build_response = check cicd_response.next();
-                if cicd_build_response !is error? {
-                    json cicd_build_response_json = check cicd_build_response.value.fromJsonWithType();
-                    string cicd_id = check cicd_build_response_json.id;
-                    cicd_build _ = check sClient->/cicd_builds/[cicd_id].put({
-                        ci_result: "succeeded"
+            if all_completed_flag {
+                stream<cd_build, persist:Error?> cd_response = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${id}`);
+                var cicd_build_response = check cd_response.next();
+                if cicd_build_response is error? {
+                    cicd_build _ = check sClient->/cicd_builds/[id].put({
+                        ci_result: "failed",
+                        cd_result: "canceled"
                     });
                 }
-
+            }
+            if all_succeeded_flag {
+                cicd_build _ = check sClient->/cicd_builds/[id].put({
+                    ci_result: "succeeded"
+                });
             }
         }
     } on fail var e {
@@ -273,8 +296,8 @@ isolated function update_parent_ci_status(string[] id_list) {
     }
 }
 
-isolated function get_map_product_ci_id(string id) returns map<int> {
-    sql:ParameterizedQuery where_clause = `cicd_buildId = ${id}`;
+isolated function get_map_product_ci_id(string cicd_id) returns map<int> {
+    sql:ParameterizedQuery where_clause = `cicd_buildId = ${cicd_id}`;
     stream<ci_build, persist:Error?> response = sClient->/ci_builds.get(ci_build, where_clause);
     map<int> map_product_ci_id = {};
     var ci_build_repsonse = response.next();
@@ -285,7 +308,6 @@ isolated function get_map_product_ci_id(string id) returns map<int> {
         int ci_build_id = check ci_build_repsonse_json.ci_build_id;
         map_product_ci_id[string:'join("-", product_name, version)] = ci_build_id;
         ci_build_repsonse = response.next();
-
     } on fail var e {
         io:println("Error in function get_map_product_ci_id");
         io:println(e);
@@ -293,19 +315,14 @@ isolated function get_map_product_ci_id(string id) returns map<int> {
     return map_product_ci_id;
 }
 
-isolated function update_cd_result_cicd_table(string id) {
+isolated function update_cd_result_cicd_table(string cicd_id) {
     do {
-        stream<cicd_build, persist:Error?> cicd_response = sClient->/cicd_builds.get(cicd_build, `id = ${id}`);
+        stream<cicd_build, persist:Error?> cicd_response = sClient->/cicd_builds.get(cicd_build, `id = ${cicd_id} and cd_result = "pending"`);
         var cicd_build_response = check cicd_response.next();
         if cicd_build_response !is error? {
-            json cicd_build_response_json = check cicd_build_response.value.fromJsonWithType();
-            string cicd_id = check cicd_build_response_json.id;
-            string cicd_cd_result = check cicd_build_response_json.cd_result;
-            if cicd_cd_result.equalsIgnoreCaseAscii("pending") {
-                cicd_build _ = check sClient->/cicd_builds/[cicd_id].put({
-                    cd_result: "started"
-                });
-            }
+            cicd_build _ = check sClient->/cicd_builds/[cicd_id].put({
+                cd_result: "inProgress"
+            });
         }
     } on fail var e {
         io:println("Error is function update_cd_result_cicd_table");
@@ -313,8 +330,8 @@ isolated function update_cd_result_cicd_table(string id) {
     }
 }
 
-isolated function insert_new_cd_builds(string id, string customer) {
-    stream<cd_build, persist:Error?> cd_response = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${id} and customer = ${customer}`);
+isolated function insert_new_cd_builds(string cicd_id, string customer) {
+    stream<cd_build, persist:Error?> cd_response = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${cicd_id} and customer = ${customer}`);
     var cd_build_response = cd_response.next();
     if cd_build_response is error? {
         cd_buildInsert[] tmp = [
@@ -323,7 +340,7 @@ isolated function insert_new_cd_builds(string id, string customer) {
                 cd_build_id: "",
                 cd_status: "inProgress",
                 customer: customer,
-                cicd_buildId: id
+                cicd_buildId: cicd_id
             }
         ];
         do {
@@ -354,6 +371,54 @@ isolated function update_inProgress_cd_builds() {
         }
     } on fail var e {
         io:println("Error is function update_inProgress_cd_builds");
+        io:println(e);
+    }
+}
+
+isolated function retrigger_failed_ci_builds(string cicd_id) {
+    stream<ci_build, persist:Error?> ci_response = sClient->/ci_builds.get(ci_build, `cicd_buildId = ${cicd_id} and ci_status = "failed"`);
+    var ci_build_response = ci_response.next();
+    while ci_build_response !is error? {
+        json ci_build_repsonse_json = check ci_build_response.value.fromJsonWithType();
+        string ci_build_record_id = check ci_build_repsonse_json.id;
+        string product = check ci_build_repsonse_json.product;
+        string version = check ci_build_repsonse_json.version;
+        json response = trigger_az_endpoint(product, version);
+        int ci_run_id = check response.id;
+        ci_build _ = check sClient->/ci_builds/[ci_build_record_id].put({
+            ci_status: "inProgress",
+            ci_build_id: ci_run_id
+        });
+    } on fail var e {
+        io:println("Error in resource function retrigger_failed_ci_builds.");
+        io:println(e);
+    }
+}
+
+isolated function update_ci_cd_status_on_retrigger_ci_builds(string cicd_id) {
+    stream<cicd_build, persist:Error?> cicd_response = sClient->/cicd_builds.get(cicd_build, `id = ${cicd_id}`);
+    var cicd_build_response = cicd_response.next();
+    while cicd_build_response !is error? {
+        cicd_build _ = check sClient->/cicd_builds/[cicd_id].put({
+            ci_result: "inProgress",
+            cd_result: "pending"
+        });
+    } on fail var e {
+        io:println("Error in resource function update_ci_cd_status_on_retrigger_ci_builds.");
+        io:println(e);
+    }
+
+}
+
+isolated function delete_failed_cd_builds(string cicd_id) {
+    stream<cd_build, persist:Error?> cd_response = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${cicd_id} and cd_status = "failed"`);
+    var cd_build_response = cd_response.next();
+    while cd_build_response !is error? {
+        json cd_build_repsonse_json = check cd_build_response.value.fromJsonWithType();
+        string cd_build_record_id = check cd_build_repsonse_json.id;
+        cd_build _ = check sClient->/cd_builds/[cd_build_record_id].delete;
+    } on fail var e {
+    	io:println("Error in resource function delete_failed_cd_builds.");
         io:println(e);
     }
 }
