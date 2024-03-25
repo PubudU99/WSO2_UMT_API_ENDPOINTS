@@ -2,6 +2,7 @@ import ballerina/http;
 import ballerina/io;
 import ballerina/persist;
 import ballerina/uuid;
+import ballerina/regex;
 
 listener http:Listener endpoint = new (5000);
 
@@ -10,8 +11,8 @@ final Client sClient = check initializeClient();
 service /cst on endpoint {
 
     isolated resource function post .(CustomerInsertCopy[] list) returns string[]|persist:Error {
-        customerInsert[] cst_info_list = getCustomersToInsert(list);
-        return sClient->/customers.post(cst_info_list);
+        customerInsert[] cstInfoList = getCustomersToInsert(list);
+        return sClient->/customers.post(cstInfoList);
     }
 
     isolated resource function get customer() returns customer[]|persist:Error {
@@ -25,24 +26,49 @@ service /cst on endpoint {
         check caller->respond(UUID);
         do {
             cicd_build insertCicdbuild = check insertCicdBuild(UUID);
-            ci_buildInsert[] ci_buildInsert_list = [];
+            ci_buildInsert[] ciBuildInsertList = [];
 
             if product_updates is ProductRegularUpdate[] {
                 foreach ProductRegularUpdate product in product_updates {
                     json response = triggerAzureEndpoint(product.productName, product.productBaseversion);
-                    int ci_run_id = check response.id;
-                    string ci_run_state = check response.state;
+                    int ciRunId = check response.id;
+                    string ciRunState = check response.state;
                     ci_buildInsert tmp = {
                         id: uuid:createType4AsString(),
-                        ci_build_id: ci_run_id,
-                        ci_status: ci_run_state,
+                        ci_build_id: ciRunId,
+                        ci_status: ciRunState,
                         product: product.productName,
                         version: product.productBaseversion,
                         cicd_buildId: insertCicdbuild.id
                     };
-                    ci_buildInsert_list.push(tmp);
+                    ciBuildInsertList.push(tmp);
                 }
-                string[] _ = check sClient->/ci_builds.post(ci_buildInsert_list);
+
+                string[] productsInvolved = getProductListForCustomerUpdateLevel(product_updates);
+
+
+                foreach string product in productsInvolved {
+                    string productName = regex:split(product, "-")[0];
+                    string productBaseversion = regex:split(product, "-")[1];
+                    string updateLevel = regex:split(product, "-")[2];
+                    json response = triggerAzureEndpoint(productName, productBaseversion, updateLevel);
+                    int ciRunId = check response.id;
+                    string ciRunState = check response.state;
+                    ci_buildInsert tmp = {
+                        id: uuid:createType4AsString(),
+                        ci_build_id: ciRunId,
+                        ci_status: ciRunState,
+                        product: productName,
+                        version: productBaseversion,
+                        cicd_buildId: insertCicdbuild.id
+                    };
+                    ciBuildInsertList.push(tmp);
+                }
+
+                // Trigger the pipeline for the other products which used by the customers
+
+                string[] _ = check sClient->/ci_builds.post(ciBuildInsertList);
+
             } else {
                 // json response = trigger_az_endpoint(product_updates.product_name, product_updates.product_base_version, product_updates.u2_level);
                 // int ci_run_id = check response.id;
@@ -62,36 +88,36 @@ service /cst on endpoint {
         }
     }
 
-    isolated resource function post builds/ci/status() returns error? { //scheduen 1
-        string[] pending_ci_cicd_id_list = getCiPendingCicdIdList();
-        updateCiStatus(pending_ci_cicd_id_list);
-        updateCiStatusCicdTable(pending_ci_cicd_id_list);
+    isolated resource function post builds/ci/status() returns error? {
+        string[] CiPendingCicdIdList = getCiPendingCicdIdList();
+        updateCiStatus(CiPendingCicdIdList);
+        updateCiStatusCicdTable(CiPendingCicdIdList);
     }
 
     isolated resource function post builds/cd/trigger() returns error? {
-        string[] pending_ci_cicd_id_list = getCiPendingCicdIdList();
-        foreach string cicd_id in pending_ci_cicd_id_list {
-            map<int> map_product_ci_id = getMapProductCiId(cicd_id);
-            string[] product_list = map_product_ci_id.keys();
-            map<string[]> map_customer_ci_list = createMapCustomerCiList(product_list, map_product_ci_id);
-            map<string> map_ci_id_state = getMapCiIdState(map_product_ci_id);
-            foreach string customer in map_customer_ci_list.keys() {
+        string[] CiPendingCicdIdList = getCiPendingCicdIdList();
+        foreach string cicdId in CiPendingCicdIdList {
+            map<int> mapProductCiId = getMapProductCiId(cicdId);
+            string[] productList = mapProductCiId.keys();
+            map<string[]> mapCustomerCiList = createMapCustomerCiList(productList, mapProductCiId);
+            map<string> mapCiIdState = getMapCiIdState(mapProductCiId);
+            foreach string customer in mapCustomerCiList.keys() {
                 boolean flag = true;
-                string[] build_id_list = <string[]>map_customer_ci_list[customer];
-                foreach string build_id in build_id_list {
-                    if "failed".equalsIgnoreCaseAscii(map_ci_id_state.get(build_id)) {
+                string[] buildIdList = <string[]>mapCustomerCiList[customer];
+                foreach string buildId in buildIdList {
+                    if "failed".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) {
                         flag = false;
                         io:println(customer + " customer's CD pipline cancelled");
                         break;
-                    } else if "inProgress".equalsIgnoreCaseAscii(map_ci_id_state.get(build_id)) {
+                    } else if "inProgress".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) {
                         flag = false;
                         io:println("Still building the image of customer " + customer);
                         break;
                     }
                 }
                 if flag {
-                    updateCdResultCicdTable(cicd_id);
-                    insertNewCdBuilds(cicd_id, customer);
+                    updateCdResultCicdTable(cicdId);
+                    insertNewCdBuilds(cicdId, customer);
                 }
             }
         }
@@ -100,9 +126,20 @@ service /cst on endpoint {
         updateInProgressCdBuilds();
     }
 
-    isolated resource function post builds/[string cicd_id]/re\-trigger() {
-        retriggerFailedCiBuilds(cicd_id);
-        updateCiCdStatusOnRetriggerCiBuilds(cicd_id);
-        deleteFailedCdBuilds(cicd_id);
+    isolated resource function get builds/[string cicdId]() returns Chunkinfo {
+        CiBuildInfo[] ciBuild = getCiBuildinfo(cicdId);
+        CdBuildInfo[] cdBuild = getCdBuildinfo(cicdId);
+        Chunkinfo chunkInfo = {
+            id: cicdId,
+            ciBuild: ciBuild,
+            cdBuild: cdBuild
+        };
+        return chunkInfo;
+    }
+
+    isolated resource function post builds/[string cicdId]/re\-trigger() {
+        retriggerFailedCiBuilds(cicdId);
+        updateCiCdStatusOnRetriggerCiBuilds(cicdId);
+        deleteFailedCdBuilds(cicdId);
     }
 }

@@ -13,6 +13,23 @@ type CustomerInsertCopy record {|
     string u2Level;
 |};
 
+type CiBuildInfo record {|
+    string product;
+    string version;
+    string status;
+|};
+
+type CdBuildInfo record {|
+    string customer;
+    string status;
+|};
+
+type Chunkinfo record {|
+    string id;
+    CiBuildInfo[] ciBuild;
+    CdBuildInfo[] cdBuild;
+|};
+
 type CiBuildCopy record {|
     string id;
     string ciBuildId;
@@ -46,17 +63,33 @@ isolated function getRunResult(string runId) returns json {
     }
 }
 
-isolated function triggerAzureEndpoint(string product, string version) returns json {
+isolated function triggerAzureEndpoint(string product, string version, string updateLevel = "") returns json {
     do {
         http:Client pipeline = check pipelineEndpoint(ci_pipeline_id);
-        json response = check pipeline->/runs.post({
-                templateParameters: {
-                    product: product,
-                    version: version
-                }
-            },
-            api\-version = "7.1-preview.1"
-        );
+        json response;
+        if !updateLevel.equalsIgnoreCaseAscii("") {
+            response = check pipeline->/runs.post({
+                    templateParameters: {
+                        product: product,
+                        version: version,
+                        update_level_type: "customer update level",
+                        customer_update_level: updateLevel
+                    }
+                },
+                api\-version = "7.1-preview.1"
+            );
+        } else {
+            response = check pipeline->/runs.post({
+                    templateParameters: {
+                        product: product,
+                        version: version,
+                        update_level_type: "latest test level"
+                    }
+
+                },
+                api\-version = "7.1-preview.1"
+            );
+        }
         return response;
     } on fail var e {
         io:println("Error in function triggerAzureEndpoint");
@@ -416,7 +449,98 @@ isolated function deleteFailedCdBuilds(string cicdId) {
         string cdBuildRecordId = check cdBuildRepsonseJson.id;
         cd_build _ = check sClient->/cd_builds/[cdBuildRecordId].delete;
     } on fail var e {
-    	io:println("Error in resource function delete_failed_cd_builds.");
+        io:println("Error in resource function delete_failed_cd_builds.");
         io:println(e);
     }
+}
+
+isolated function getCiBuildinfo(string cicdId) returns CiBuildInfo[] {
+    CiBuildInfo[] ciBuildList = [];
+    stream<ci_build, persist:Error?> ciResponseStream = sClient->/ci_builds.get(ci_build, `cicd_buildId = ${cicdId}`);
+    var ciBuildResponse = ciResponseStream.next();
+    while ciBuildResponse !is error? {
+        json ciBuildResponseJson = check ciBuildResponse.value.fromJsonWithType();
+        string product = check ciBuildResponseJson.product;
+        string version = check ciBuildResponseJson.version;
+        string buildStatus = check ciBuildResponseJson.ci_status;
+        CiBuildInfo tmp = {
+            product: product,
+            version: version,
+            status: buildStatus
+        };
+        ciBuildList.push(tmp);
+        ciBuildResponse = ciResponseStream.next();
+    } on fail var e {
+        io:println("Error in resource function getCiBuildinfo.");
+        io:println(e);
+    }
+    return ciBuildList;
+}
+
+isolated function getCdBuildinfo(string cicdId) returns CdBuildInfo[] {
+    CdBuildInfo[] cdBuildList = [];
+    stream<cd_build, persist:Error?> cdResponseStream = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${cicdId}`);
+    var cdBuildResponse = cdResponseStream.next();
+    while cdBuildResponse !is error? {
+        json cdBuildResponseJson = check cdBuildResponse.value.fromJsonWithType();
+        string customer = check cdBuildResponseJson.customer;
+        string buildStatus = check cdBuildResponseJson.cd_status;
+        CdBuildInfo tmp = {
+            customer: customer,
+            status: buildStatus
+        };
+        cdBuildList.push(tmp);
+        cdBuildResponse = cdResponseStream.next();
+    } on fail var e {
+        io:println("Error in resource function getCdBuildinfo.");
+        io:println(e);
+    }
+    return cdBuildList;
+}
+
+isolated function getUniqueList(string[] s) returns string[] {
+    map<()> m = {};
+    foreach var i in s {
+        m[i] = ();
+    }
+    string[] unique = m.keys();
+    return unique;
+}
+
+isolated function getProductListForCustomerUpdateLevel(ProductRegularUpdate[] product_updates) returns string[] {
+    string[] customer_list = [];
+    foreach ProductRegularUpdate product in product_updates {
+        string productName = product.productName;
+        string version = product.productBaseversion;
+        stream<customer, persist:Error?> customerResponseStream = sClient->/customers.get(customer, `(product_name = ${productName} AND product_base_version = ${version})`);
+        var customerStreamItem = customerResponseStream.next();
+        while customerStreamItem !is error? {
+            json customer = check customerStreamItem.value.fromJsonWithType();
+            string customerName = check customer.customer_key;
+            customer_list.push(customerName);
+        } on fail var e {
+            io:println("Error in resource function getCustomerListForUpdates.");
+            io:println(e);
+        }
+    }
+    string[] customersInvolved = getUniqueList(customer_list);
+    string[] productsInvolved = [];
+    foreach string customerName in customersInvolved {
+        foreach ProductRegularUpdate product in product_updates {
+            string productName = product.productName;
+            string version = product.productBaseversion;
+            stream<customer, persist:Error?> customerResponseStream = sClient->/customers.get(customer, `NOT(product_name = ${productName} AND product_base_version = ${version}) AND customer = ${customerName}`);
+            var customerStreamItem = customerResponseStream.next();
+            while customerStreamItem !is error? {
+                json customer = check customerStreamItem.value.fromJsonWithType();
+                string updateLevel = check customer.u2_level;
+                string productInvolved = string:'join("-", productName, version, updateLevel);
+                productsInvolved.push(productInvolved);
+            } on fail var e {
+                io:println("Error in resource function getCustomerListForUpdates.");
+                io:println(e);
+            }
+        }
+    }
+    return getUniqueList(productsInvolved);
 }
