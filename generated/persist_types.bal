@@ -62,7 +62,7 @@ public type cicd_buildUpdate record {|
 
 public type ci_build record {|
     readonly string id;
-    int ci_build_id;
+    string ci_build_id;
     string ci_status;
     string product;
     string version;
@@ -71,7 +71,7 @@ public type ci_build record {|
 
 public type ci_buildOptionalized record {|
     string id?;
-    int ci_build_id?;
+    string ci_build_id?;
     string ci_status?;
     string product?;
     string version?;
@@ -88,7 +88,7 @@ public type ci_buildTargetType typedesc<ci_buildWithRelations>;
 public type ci_buildInsert ci_build;
 
 public type ci_buildUpdate record {|
-    int ci_build_id?;
+    string ci_build_id?;
     string ci_status?;
     string product?;
     string version?;

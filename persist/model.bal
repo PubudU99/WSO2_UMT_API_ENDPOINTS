@@ -23,7 +23,7 @@ public type cicd_build record {|
 
 public type ci_build record {|
     readonly string id;
-    int ci_build_id;
+    string ci_build_id;
     string ci_status;
     string product;
     string version;

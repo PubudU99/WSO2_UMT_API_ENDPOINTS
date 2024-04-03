@@ -6,7 +6,7 @@ import ballerina/sql;
 import ballerina/uuid;
 
 type CustomerInsertCopy record {|
-    string customer_key;
+    string customerKey;
     string environment;
     string productName;
     string productBaseversion;
@@ -63,7 +63,7 @@ isolated function getRunResult(string runId) returns json {
     }
 }
 
-isolated function triggerAzureEndpoint(string product, string version, string updateLevel = "") returns json {
+isolated function triggerAzureEndpointCiBuild(string product, string version, string updateLevel = "") returns json {
     do {
         http:Client pipeline = check pipelineEndpoint(ci_pipeline_id);
         json response;
@@ -92,15 +92,33 @@ isolated function triggerAzureEndpoint(string product, string version, string up
         }
         return response;
     } on fail var e {
-        io:println("Error in function triggerAzureEndpoint");
+        io:println("Error in function triggerAzureEndpointCiBuild");
         io:println(e);
     }
 }
 
-isolated function getMapCiIdState(map<int> mapProductCiId) returns map<string> {
+isolated function triggerAzureEndpointCdBuild(string customer, string product_string) returns json {
+    do {
+        http:Client pipeline = check pipelineEndpoint(cd_pipeline_id);
+        json response = check pipeline->/runs.post({
+                templateParameters: {
+                    customer: customer,
+                    product_string: product_string
+                }
+            },
+            api\-version = "7.1-preview.1"
+        );
+        return response;
+    } on fail var e {
+        io:println("Error in function triggerAzureEndpointCdBuild");
+        io:println(e);
+    }
+}
+
+isolated function getMapCiIdState(map<string> mapProductCiId) returns map<string> {
     map<string> mapCiIdState = {};
     foreach string product in mapProductCiId.keys() {
-        int ciId = mapProductCiId.get(product);
+        string ciId = mapProductCiId.get(product);
         json run = getRunResult(ciId.toString());
         string runState = check run.state;
         sql:ParameterizedQuery whereClause = `ciBuildId = ${ciId}`;
@@ -137,7 +155,7 @@ isolated function getCustomersToInsert(CustomerInsertCopy[] list) returns custom
 
         customerInsert tmp = {
             id: uuid:createType4AsString(),
-            customer_key: item.customer_key,
+            customer_key: item.customerKey,
             environment: item.environment,
             product_name: item.productName,
             product_base_version: item.productBaseversion,
@@ -195,7 +213,7 @@ isolated function insertCicdBuild(string uuid) returns cicd_buildInsert|error {
     return tmp;
 }
 
-isolated function createMapCustomerCiList(string[] product_list, map<int> mapProductCiId) returns map<string[]> {
+isolated function createMapCustomerCiList(string[] product_list, map<string> mapProductCiId) returns map<string[]> {
     map<string[]> mapCustomerProduct = {};
     // If the product list is type ProductRegularUpdate
     foreach string product in product_list {
@@ -205,7 +223,7 @@ isolated function createMapCustomerCiList(string[] product_list, map<int> mapPro
         sql:ParameterizedQuery whereClauseProduct = `(product_name = ${productName} AND product_base_version = ${version})`;
         stream<customer, persist:Error?> response = sClient->/customers.get(customer, whereClauseProduct);
         var customerStreamItem = response.next();
-        int customerProductCiId = <int>mapProductCiId[product];
+        string customerProductCiId = <string>mapProductCiId[product];
         // Iterate on the customer list and maintaining a map to record which builds should be completed for a spcific customer to start tests
         while customerStreamItem !is error? {
             json customer = check customerStreamItem.value.fromJsonWithType();
@@ -262,7 +280,7 @@ isolated function updateCiStatus(string[] idList) {
         var ciBuildResponse = response.next();
         while ciBuildResponse !is error? {
             json ciBuildResponseJson = check ciBuildResponse.value.fromJsonWithType();
-            int ciBuildId = check ciBuildResponseJson.ciBuildId;
+            string ciBuildId = check ciBuildResponseJson.ciBuildId;
             string ciId = check ciBuildResponseJson.id;
             json runResponse = check pipeline->/runs/[ciBuildId].get(api\-version = "7.1-preview.1");
             string runState = check runResponse.state;
@@ -276,9 +294,6 @@ isolated function updateCiStatus(string[] idList) {
                 ci_status: runResult
             });
             ciBuildResponse = response.next();
-        } on fail var e {
-            io:println("Error in function get_idList ");
-            io:println(e);
         }
     } on fail var e {
         io:println("Error in function update_ci_status");
@@ -327,16 +342,16 @@ isolated function updateCiStatusCicdTable(string[] idList) {
     }
 }
 
-isolated function getMapProductCiId(string cicdId) returns map<int> {
+isolated function getMapProductCiId(string cicdId) returns map<string> {
     sql:ParameterizedQuery whereClause = `cicd_buildId = ${cicdId}`;
     stream<ci_build, persist:Error?> response = sClient->/ci_builds.get(ci_build, whereClause);
-    map<int> mapProductCiId = {};
+    map<string> mapProductCiId = {};
     var ciBuildRepsonse = response.next();
     while ciBuildRepsonse !is error? {
         json ciBuildRepsonseJson = check ciBuildRepsonse.value.fromJsonWithType();
         string productName = check ciBuildRepsonseJson.product;
         string version = check ciBuildRepsonseJson.version;
-        int ciBuildId = check ciBuildRepsonseJson.ciBuildId;
+        string ciBuildId = check ciBuildRepsonseJson.ciBuildId;
         mapProductCiId[string:'join("-", productName, version)] = ciBuildId;
         ciBuildRepsonse = response.next();
     } on fail var e {
@@ -362,26 +377,30 @@ isolated function updateCdResultCicdTable(string cicdId) {
 }
 
 isolated function insertNewCdBuilds(string cicdId, string customer) {
-    stream<cd_build, persist:Error?> cd_response = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${cicdId} and customer = ${customer}`);
-    var cdBuildResponse = cd_response.next();
-    if cdBuildResponse is error? {
-        cd_buildInsert[] tmp = [
-            {
-                id: uuid:createType4AsString(),
-                cd_build_id: "",
-                cd_status: "inProgress",
-                customer: customer,
-                cicd_buildId: cicdId
-            }
-        ];
-        do {
+    do {
+        stream<cd_build, persist:Error?> cd_response = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${cicdId} and customer = ${customer}`);
+        var cdBuildResponse = cd_response.next();
+        if cdBuildResponse is error? {
+            string product_list = getCustomerProductImageList(cicdId, customer);
+            json response = triggerAzureEndpointCdBuild(customer, product_list);
+            string cdRunId = check response.id;
+            string cdRunState = check response.state;
+            cd_buildInsert[] tmp = [
+                {
+                    id: uuid:createType4AsString(),
+                    cd_build_id: cdRunId,
+                    cd_status: cdRunState,
+                    customer: customer,
+                    cicd_buildId: cicdId
+                }
+            ];
             string[] _ = check sClient->/cd_builds.post(tmp);
-        } on fail var e {
-            io:println("Error is function update_cd_result_cicd_table");
-            io:println(e);
+            io:println("Start CD pipeline of customer " + customer);
+            io:println("Create an entry in cd_build table");
         }
-        io:println("Start CD pipeline of customer " + customer);
-        io:println("Create an entry in cd_build table");
+    } on fail var e {
+        io:println("Error is function insertNewCdBuilds");
+        io:println(e);
     }
 }
 
@@ -414,8 +433,8 @@ isolated function retriggerFailedCiBuilds(string cicdId) {
         string ciBuildRecordId = check ciBuildRepsonseJson.id;
         string product = check ciBuildRepsonseJson.product;
         string version = check ciBuildRepsonseJson.version;
-        json response = triggerAzureEndpoint(product, version);
-        int ciRunId = check response.id;
+        json response = triggerAzureEndpointCiBuild(product, version);
+        string ciRunId = check response.id;
         ci_build _ = check sClient->/ci_builds/[ciBuildRecordId].put({
             ci_status: "inProgress",
             ci_build_id: ciRunId
@@ -507,7 +526,7 @@ isolated function getUniqueList(string[] s) returns string[] {
     return unique;
 }
 
-isolated function getProductListForCustomerUpdateLevel(ProductRegularUpdate[] product_updates) returns string[] {
+isolated function getProductListForInvolvedCustomerUpdateLevel(ProductRegularUpdate[] product_updates) returns string[] {
     string[] customer_list = [];
     foreach ProductRegularUpdate product in product_updates {
         string productName = product.productName;
@@ -518,6 +537,7 @@ isolated function getProductListForCustomerUpdateLevel(ProductRegularUpdate[] pr
             json customer = check customerStreamItem.value.fromJsonWithType();
             string customerName = check customer.customer_key;
             customer_list.push(customerName);
+            customerStreamItem = customerResponseStream.next();
         } on fail var e {
             io:println("Error in resource function getCustomerListForUpdates.");
             io:println(e);
@@ -536,6 +556,7 @@ isolated function getProductListForCustomerUpdateLevel(ProductRegularUpdate[] pr
                 string updateLevel = check customer.u2_level;
                 string productInvolved = string:'join("-", productName, version, updateLevel);
                 productsInvolved.push(productInvolved);
+                customerStreamItem = customerResponseStream.next();
             } on fail var e {
                 io:println("Error in resource function getCustomerListForUpdates.");
                 io:println(e);
@@ -543,4 +564,87 @@ isolated function getProductListForCustomerUpdateLevel(ProductRegularUpdate[] pr
         }
     }
     return getUniqueList(productsInvolved);
+}
+
+isolated function getCustomerProductImageList(string cicdId, string customerName) returns string {
+    stream<customer, persist:Error?> customerResponseStream = sClient->/customers.get(customer, `(customer_key = ${customerName})`);
+    stream<ci_build, persist:Error?> ciResponseStream = sClient->/ci_builds.get(ci_build, `cicd_buildId = ${cicdId}`);
+
+    string[] ProductsWithUpdates = [];
+    var ciBuildResponse = ciResponseStream.next();
+    while ciBuildResponse !is error? {
+        json ciBuildResponseJson = check ciBuildResponse.value.fromJsonWithType();
+        string product = check ciBuildResponseJson.product;
+        string version = check ciBuildResponseJson.version;
+        ProductsWithUpdates.push(string:'join("-", product, version));
+        ciBuildResponse = ciResponseStream.next();
+    } on fail var e {
+        io:println("Error in resource function getCustomerProductImageList first while.");
+        io:println(e);
+    }
+
+    string[] customerUsingProducts = [];
+    string[] customerUsingProductsWithUpdateLevel = [];
+    var customerResponse = customerResponseStream.next();
+    while customerResponse !is error? {
+        json customerResponseJson = check customerResponse.value.fromJsonWithType();
+        string product = check customerResponseJson.product_name;
+        string version = check customerResponseJson.product_base_version;
+        customerUsingProducts.push(string:'join("-", product, version));
+        customerUsingProductsWithUpdateLevel.push(string:'join(""));
+        customerResponse = customerResponseStream.next();
+    } on fail var e {
+        io:println("Error in resource function getCustomerProductImageList second while.");
+        io:println(e);
+    }
+
+    string[] customerUsingProductsWithUpdates = from string productU in ProductsWithUpdates
+        join string product in customerUsingProducts on productU equals product
+        select productU;
+    string[] customerUsingProductsWithoutUpdates = [];
+
+    int i = 0;
+    while (i < customerUsingProductsWithUpdates.length()) {
+        customerUsingProductsWithUpdates[i] = string:'join(".", customerUsingProductsWithUpdates[i], "test");
+        i = i + 1;
+    }
+
+    foreach string product in customerUsingProducts {
+        customerUsingProductsWithoutUpdates.push(product);
+    }
+
+    i = 0;
+    while (i < customerUsingProducts.length()) {
+        int j = 0;
+        while (j < customerUsingProductsWithUpdates.length()) {
+            if customerUsingProducts[i].equalsIgnoreCaseAscii(customerUsingProductsWithUpdates[j]) {
+                string _ = customerUsingProductsWithoutUpdates.remove(i);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    i = 0;
+    while (i < customerUsingProductsWithoutUpdates.length()) {
+        string product = customerUsingProductsWithoutUpdates[i];
+        string productName = regex:split(product, "-")[0];
+        string version = regex:split(product, "-")[1];
+        customerResponseStream = sClient->/customers.get(customer, `customer_key = ${customerName} and product_name = ${productName} and version = ${version}`);
+        var customerReponse = customerResponseStream.next();
+        if customerReponse !is error? {
+            json customerReponseJson = check customerReponse.value.fromJsonWithType();
+            string updateLevel = check customerReponseJson.u2_level;
+            string tmp = string:'join(product, updateLevel);
+            customerUsingProductsWithoutUpdates[i] = tmp;
+        }
+        i = i + 1;
+    } on fail var e {
+        io:println("Error in resource function getCustomerProductImageList last while.");
+        io:println(e);
+    }
+
+    string[] customerProductImages = [...customerUsingProductsWithoutUpdates, ...customerUsingProductsWithUpdates];
+
+    return string:'join("|", ...customerProductImages);
 }

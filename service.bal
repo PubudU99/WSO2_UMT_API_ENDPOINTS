@@ -1,8 +1,8 @@
 import ballerina/http;
 import ballerina/io;
 import ballerina/persist;
-import ballerina/uuid;
 import ballerina/regex;
+import ballerina/uuid;
 
 listener http:Listener endpoint = new (5000);
 
@@ -21,17 +21,17 @@ service /cst on endpoint {
             select customer;
     }
 
-    isolated resource function post builds(http:Caller caller, ProductRegularUpdate[]|ProductHotfixUpdate product_updates) returns error? {
-        string UUID = uuid:createType4AsString();
-        check caller->respond(UUID);
+    isolated resource function post builds(http:Caller caller, ProductRegularUpdate[]|ProductHotfixUpdate product_updates) {
         do {
+            string UUID = uuid:createType4AsString();
+            check caller->respond(UUID);
             cicd_build insertCicdbuild = check insertCicdBuild(UUID);
             ci_buildInsert[] ciBuildInsertList = [];
 
             if product_updates is ProductRegularUpdate[] {
                 foreach ProductRegularUpdate product in product_updates {
-                    json response = triggerAzureEndpoint(product.productName, product.productBaseversion);
-                    int ciRunId = check response.id;
+                    json response = triggerAzureEndpointCiBuild(product.productName, product.productBaseversion);
+                    string ciRunId = check response.id;
                     string ciRunState = check response.state;
                     ci_buildInsert tmp = {
                         id: uuid:createType4AsString(),
@@ -44,15 +44,14 @@ service /cst on endpoint {
                     ciBuildInsertList.push(tmp);
                 }
 
-                string[] productsInvolved = getProductListForCustomerUpdateLevel(product_updates);
-
+                string[] productsInvolved = getProductListForInvolvedCustomerUpdateLevel(product_updates);
 
                 foreach string product in productsInvolved {
                     string productName = regex:split(product, "-")[0];
                     string productBaseversion = regex:split(product, "-")[1];
                     string updateLevel = regex:split(product, "-")[2];
-                    json response = triggerAzureEndpoint(productName, productBaseversion, updateLevel);
-                    int ciRunId = check response.id;
+                    json response = triggerAzureEndpointCiBuild(productName, productBaseversion, updateLevel);
+                    string ciRunId = check response.id;
                     string ciRunState = check response.state;
                     ci_buildInsert tmp = {
                         id: uuid:createType4AsString(),
@@ -65,22 +64,12 @@ service /cst on endpoint {
                     ciBuildInsertList.push(tmp);
                 }
 
+                io:println(ciBuildInsertList);
+
                 // Trigger the pipeline for the other products which used by the customers
 
                 string[] _ = check sClient->/ci_builds.post(ciBuildInsertList);
 
-            } else {
-                // json response = trigger_az_endpoint(product_updates.product_name, product_updates.product_base_version, product_updates.u2_level);
-                // int ci_run_id = check response.id;
-                // string ci_run_state = check response.state;
-                // ci_buildInsert tmp = {
-                //     id: uuid:createType4AsString(),
-                //     ci_build_id: ci_run_id,
-                //     ci_status: ci_run_state,
-                //     product: product_updates.product_name,
-                //     version: product_updates.product_base_version,
-                //     cicd_buildId: insertCicdbuild.id
-                // };
             }
         } on fail var e {
             io:println("Error in resource function trigger CI builds.");
@@ -97,7 +86,7 @@ service /cst on endpoint {
     isolated resource function post builds/cd/trigger() returns error? {
         string[] CiPendingCicdIdList = getCiPendingCicdIdList();
         foreach string cicdId in CiPendingCicdIdList {
-            map<int> mapProductCiId = getMapProductCiId(cicdId);
+            map<string> mapProductCiId = getMapProductCiId(cicdId);
             string[] productList = mapProductCiId.keys();
             map<string[]> mapCustomerCiList = createMapCustomerCiList(productList, mapProductCiId);
             map<string> mapCiIdState = getMapCiIdState(mapProductCiId);
