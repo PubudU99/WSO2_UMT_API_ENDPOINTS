@@ -52,6 +52,15 @@ type ProductHotfixUpdate record {|
     string u2Level;
 |};
 
+type AcrImageList record {|
+    string[] repositories;
+|};
+
+type DeletedImage record {|
+    string[] manifestsDeleted;
+    string[] tagsDeleted;
+|};
+
 isolated function getRunResult(string runId) returns json {
     do {
         http:Client pipeline = check pipelineEndpoint(ci_pipeline_id);
@@ -194,6 +203,16 @@ isolated function pipelineEndpoint(string pipeline_id) returns http:Client|error
         }
     }
     );
+    return clientEndpoint;
+}
+
+isolated function getAcrEndpoint() returns http:Client|error {
+    http:Client clientEndpoint = check new ("https://cstimage.azurecr.io/acr/v1", {
+        auth: {
+            username: acr_username,
+            password: acr_password
+        }
+    });
     return clientEndpoint;
 }
 
@@ -647,4 +666,65 @@ isolated function getCustomerProductImageList(string cicdId, string customerName
     string[] customerProductImages = [...customerUsingProductsWithoutUpdates, ...customerUsingProductsWithUpdates];
 
     return string:'join("|", ...customerProductImages);
+}
+
+isolated function getImageNotInACR(string[] productImages) returns string[] {
+    string[] productImagesNotInACR = [];
+    do {
+        string[] acrImageList = check getImageInACR();
+
+        foreach string product in productImages {
+            boolean imageInAcr = false;
+            foreach string acrImage in acrImageList {
+                if acrImage.equalsIgnoreCaseAscii(product) {
+                    imageInAcr = true;
+                    break;
+                }
+            }
+            if !imageInAcr {
+                productImagesNotInACR.push(product);
+            }
+        }
+
+    } on fail var e {
+        io:println("Error in resource function getImageNotInACR.");
+        io:println(e);
+    }
+    return productImagesNotInACR;
+}
+
+isolated function getImageInACR() returns string[] {
+    string[] imageList = [];
+    do {
+        http:Client acrEndpoint = check getAcrEndpoint();
+        AcrImageList acrImages = check acrEndpoint->/_catalog.get();
+        imageList = acrImages.repositories;
+    } on fail var e {
+        io:println("Error in resource function getImageInACR.");
+        io:println(e);
+    }
+    return imageList;
+}
+
+isolated function getProductImageForCustomerUpdateLevel() returns string[] {
+    string[] productImageListForCustomerupdateLevel = [];
+    stream<customer, persist:Error?> customerResponseStream = sClient->/customers;
+    var customerStreamItem = customerResponseStream.next();
+    while customerStreamItem !is error? {
+        json customer = check customerStreamItem.value.fromJsonWithType();
+        string productName = check customer.product_name;
+        string version = check customer.product_base_vesion;
+        string updateLevel = check customer.u2_level;
+        string imageName = string:'join("-", productName, string:'join(".", version, updateLevel));
+        productImageListForCustomerupdateLevel.push(imageName);
+        customerStreamItem = customerResponseStream.next();
+    } on fail var e {
+        io:println("Error in resource function getProductImageForCustomerUpdateLevel.");
+        io:println(e);
+    }
+    return productImageListForCustomerupdateLevel;
+}
+
+isolated function getCleanupAcrImagelistMap() {
+    
 }

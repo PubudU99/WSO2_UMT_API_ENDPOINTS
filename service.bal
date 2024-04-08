@@ -45,8 +45,9 @@ service /cst on endpoint {
                 }
 
                 string[] productsInvolved = getProductListForInvolvedCustomerUpdateLevel(product_updates);
+                string[] imagesNotInAcr = getImageNotInACR(productsInvolved);
 
-                foreach string product in productsInvolved {
+                foreach string product in imagesNotInAcr {
                     string productName = regex:split(product, "-")[0];
                     string productBaseversion = regex:split(product, "-")[1];
                     string updateLevel = regex:split(product, "-")[2];
@@ -131,4 +132,45 @@ service /cst on endpoint {
         updateCiCdStatusOnRetriggerCiBuilds(cicdId);
         deleteFailedCdBuilds(cicdId);
     }
+
+    isolated resource function post acr\-cleanup() returns error? {
+        string[] acrImageList = getImageInACR();
+        string[] productImageListForCustomerupdateLevel = getProductImageForCustomerUpdateLevel();
+
+        // create a map with boolean false
+        map<boolean> acrImageListMap = {};
+        foreach string imageName in acrImageList {
+            acrImageListMap[imageName] = false;
+        }
+
+        // Mark the customer products images with their update level as true
+        foreach string imageName in productImageListForCustomerupdateLevel {
+            if acrImageListMap.hasKey(imageName) {
+                acrImageListMap[imageName] = true;
+            }
+        }
+
+        // Mark the last 5 images created as true
+        int imageLength = acrImageList.length();
+        if imageLength > 5 {
+            acrImageListMap[acrImageList[imageLength - 1]] = true;
+            acrImageListMap[acrImageList[imageLength - 2]] = true;
+            acrImageListMap[acrImageList[imageLength - 3]] = true;
+            acrImageListMap[acrImageList[imageLength - 4]] = true;
+            acrImageListMap[acrImageList[imageLength - 5]] = true;
+        }
+
+        // Filter the images which are in value false that need to be deleted
+        map<boolean> cleanupAcrImagelistMap = acrImageListMap.filter(image => image == false);
+
+        // Delete the images
+        foreach string image in cleanupAcrImagelistMap.keys() {
+            http:Client acrEndpoint = check getAcrEndpoint();
+            DeletedImage _ = check acrEndpoint->/[image].delete();
+        }
+    }
+
+    // isolated resource function get hai() returns AcrImageList|http:ClientError{
+    //     return check getAcrImageList();
+    // }
 }
