@@ -265,16 +265,15 @@ isolated function createMapCustomerCiList(string[] product_list, map<string> map
     return mapCustomerProduct;
 }
 
-isolated function getCiPendingCicdIdList() returns string[] {
-    sql:ParameterizedQuery whereClause = `ci_result = "inProgress"`;
+isolated function getCiPendingCicdIdList( sql:ParameterizedQuery whereClause) returns string[] {
     string[] idList = [];
-    stream<cicd_build, persist:Error?> response = sClient->/cicd_builds.get(cicd_build, whereClause);
-    var idResponse = response.next();
-    while idResponse !is error? {
-        json idRecord = check idResponse.value.fromJsonWithType();
-        string id = check idRecord.id;
+    stream<cicd_build, persist:Error?> cicdResponseStream = sClient->/cicd_builds.get(cicd_build, whereClause);
+    var cicdResponse = cicdResponseStream.next();
+    while cicdResponse !is error? {
+        json cicdResponseJson = check cicdResponse.value.fromJsonWithType();
+        string id = check cicdResponseJson.id;
         idList.push(id);
-        idResponse = response.next();
+        cicdResponse = cicdResponseStream.next();
     } on fail var e {
         io:println("Error in function get_pending_ci_idList ");
         io:println(e);
@@ -726,5 +725,5 @@ isolated function getProductImageForCustomerUpdateLevel() returns string[] {
 }
 
 isolated function getCleanupAcrImagelistMap() {
-    
+
 }

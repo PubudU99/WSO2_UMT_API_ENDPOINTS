@@ -2,6 +2,7 @@ import ballerina/http;
 import ballerina/io;
 import ballerina/persist;
 import ballerina/regex;
+import ballerina/sql;
 import ballerina/uuid;
 
 listener http:Listener endpoint = new (5000);
@@ -79,13 +80,15 @@ service /cst on endpoint {
     }
 
     isolated resource function post builds/ci/status() returns error? {
-        string[] CiPendingCicdIdList = getCiPendingCicdIdList();
+        sql:ParameterizedQuery whereClause = `ci_result = "inProgress"`;
+        string[] CiPendingCicdIdList = getCiPendingCicdIdList(whereClause);
         updateCiStatus(CiPendingCicdIdList);
         updateCiStatusCicdTable(CiPendingCicdIdList);
     }
 
     isolated resource function post builds/cd/trigger() returns error? {
-        string[] CiPendingCicdIdList = getCiPendingCicdIdList();
+        sql:ParameterizedQuery whereClause = `ci_result = "inProgress" OR ci_result = "succeeded"`;
+        string[] CiPendingCicdIdList = getCiPendingCicdIdList(whereClause);
         foreach string cicdId in CiPendingCicdIdList {
             map<string> mapProductCiId = getMapProductCiId(cicdId);
             string[] productList = mapProductCiId.keys();
@@ -98,6 +101,9 @@ service /cst on endpoint {
                     if "failed".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) {
                         flag = false;
                         io:println(customer + " customer's CD pipline cancelled");
+                        cicd_build _ = check sClient->/cicd_builds/[cicdId].put({
+                            cd_result: "failed due to ci build fail"
+                        });
                         break;
                     } else if "inProgress".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) {
                         flag = false;
