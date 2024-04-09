@@ -32,7 +32,8 @@ service /cst on endpoint {
             if product_updates is ProductRegularUpdate[] {
                 foreach ProductRegularUpdate product in product_updates {
                     json response = triggerAzureEndpointCiBuild(product.productName, product.productBaseversion);
-                    string ciRunId = check response.id;
+                    io:println(response);
+                    int ciRunId = check response.id;
                     string ciRunState = check response.state;
                     ci_buildInsert tmp = {
                         id: uuid:createType4AsString(),
@@ -53,7 +54,8 @@ service /cst on endpoint {
                     string productBaseversion = regex:split(product, "-")[1];
                     string updateLevel = regex:split(product, "-")[2];
                     json response = triggerAzureEndpointCiBuild(productName, productBaseversion, updateLevel);
-                    string ciRunId = check response.id;
+                    io:println(response);
+                    int ciRunId = check response.id;
                     string ciRunState = check response.state;
                     ci_buildInsert tmp = {
                         id: uuid:createType4AsString(),
@@ -66,7 +68,7 @@ service /cst on endpoint {
                     ciBuildInsertList.push(tmp);
                 }
 
-                io:println(ciBuildInsertList);
+                // io:println(ciBuildInsertList);
 
                 // Trigger the pipeline for the other products which used by the customers
 
@@ -90,7 +92,7 @@ service /cst on endpoint {
         sql:ParameterizedQuery whereClause = `ci_result = "inProgress" OR ci_result = "succeeded"`;
         string[] CiPendingCicdIdList = getCiPendingCicdIdList(whereClause);
         foreach string cicdId in CiPendingCicdIdList {
-            map<string> mapProductCiId = getMapProductCiId(cicdId);
+            map<int> mapProductCiId = getMapProductCiId(cicdId);
             string[] productList = mapProductCiId.keys();
             map<string[]> mapCustomerCiList = createMapCustomerCiList(productList, mapProductCiId);
             map<string> mapCiIdState = getMapCiIdState(mapProductCiId);

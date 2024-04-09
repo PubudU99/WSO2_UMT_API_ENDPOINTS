@@ -32,7 +32,7 @@ type Chunkinfo record {|
 
 type CiBuildCopy record {|
     string id;
-    string ciBuildId;
+    int ciBuildId;
     string ciStatus;
     string product;
     string version;
@@ -109,6 +109,7 @@ isolated function triggerAzureEndpointCiBuild(string product, string version, st
 isolated function triggerAzureEndpointCdBuild(string customer, string product_string) returns json {
     do {
         http:Client pipeline = check pipelineEndpoint(cd_pipeline_id);
+        io:println(product_string);
         json response = check pipeline->/runs.post({
                 templateParameters: {
                     customer: customer,
@@ -124,13 +125,13 @@ isolated function triggerAzureEndpointCdBuild(string customer, string product_st
     }
 }
 
-isolated function getMapCiIdState(map<string> mapProductCiId) returns map<string> {
+isolated function getMapCiIdState(map<int> mapProductCiId) returns map<string> {
     map<string> mapCiIdState = {};
     foreach string product in mapProductCiId.keys() {
-        string ciId = mapProductCiId.get(product);
+        int ciId = mapProductCiId.get(product);
         json run = getRunResult(ciId.toString());
         string runState = check run.state;
-        sql:ParameterizedQuery whereClause = `ciBuildId = ${ciId}`;
+        sql:ParameterizedQuery whereClause = `ci_build_id = ${ciId}`;
         stream<ci_build, persist:Error?> response = sClient->/ci_builds.get(ci_build, whereClause);
         var ciBuildResponse = check response.next();
         if ciBuildResponse !is error? {
@@ -232,7 +233,7 @@ isolated function insertCicdBuild(string uuid) returns cicd_buildInsert|error {
     return tmp;
 }
 
-isolated function createMapCustomerCiList(string[] product_list, map<string> mapProductCiId) returns map<string[]> {
+isolated function createMapCustomerCiList(string[] product_list, map<int> mapProductCiId) returns map<string[]> {
     map<string[]> mapCustomerProduct = {};
     // If the product list is type ProductRegularUpdate
     foreach string product in product_list {
@@ -242,7 +243,7 @@ isolated function createMapCustomerCiList(string[] product_list, map<string> map
         sql:ParameterizedQuery whereClauseProduct = `(product_name = ${productName} AND product_base_version = ${version})`;
         stream<customer, persist:Error?> response = sClient->/customers.get(customer, whereClauseProduct);
         var customerStreamItem = response.next();
-        string customerProductCiId = <string>mapProductCiId[product];
+        int customerProductCiId = <int>mapProductCiId[product];
         // Iterate on the customer list and maintaining a map to record which builds should be completed for a spcific customer to start tests
         while customerStreamItem !is error? {
             json customer = check customerStreamItem.value.fromJsonWithType();
@@ -298,7 +299,7 @@ isolated function updateCiStatus(string[] idList) {
         var ciBuildResponse = response.next();
         while ciBuildResponse !is error? {
             json ciBuildResponseJson = check ciBuildResponse.value.fromJsonWithType();
-            string ciBuildId = check ciBuildResponseJson.ciBuildId;
+            int ciBuildId = check ciBuildResponseJson.ci_build_id;
             string ciId = check ciBuildResponseJson.id;
             json runResponse = check pipeline->/runs/[ciBuildId].get(api\-version = "7.1-preview.1");
             string runState = check runResponse.state;
@@ -360,16 +361,16 @@ isolated function updateCiStatusCicdTable(string[] idList) {
     }
 }
 
-isolated function getMapProductCiId(string cicdId) returns map<string> {
+isolated function getMapProductCiId(string cicdId) returns map<int> {
     sql:ParameterizedQuery whereClause = `cicd_buildId = ${cicdId}`;
     stream<ci_build, persist:Error?> response = sClient->/ci_builds.get(ci_build, whereClause);
-    map<string> mapProductCiId = {};
+    map<int> mapProductCiId = {};
     var ciBuildRepsonse = response.next();
     while ciBuildRepsonse !is error? {
         json ciBuildRepsonseJson = check ciBuildRepsonse.value.fromJsonWithType();
         string productName = check ciBuildRepsonseJson.product;
         string version = check ciBuildRepsonseJson.version;
-        string ciBuildId = check ciBuildRepsonseJson.ciBuildId;
+        int ciBuildId = check ciBuildRepsonseJson.ci_build_id;
         mapProductCiId[string:'join("-", productName, version)] = ciBuildId;
         ciBuildRepsonse = response.next();
     } on fail var e {
@@ -401,7 +402,7 @@ isolated function insertNewCdBuilds(string cicdId, string customer) {
         if cdBuildResponse is error? {
             string product_list = getCustomerProductImageList(cicdId, customer);
             json response = triggerAzureEndpointCdBuild(customer, product_list);
-            string cdRunId = check response.id;
+            int cdRunId = check response.id;
             string cdRunState = check response.state;
             cd_buildInsert[] tmp = [
                 {
@@ -452,7 +453,7 @@ isolated function retriggerFailedCiBuilds(string cicdId) {
         string product = check ciBuildRepsonseJson.product;
         string version = check ciBuildRepsonseJson.version;
         json response = triggerAzureEndpointCiBuild(product, version);
-        string ciRunId = check response.id;
+        int ciRunId = check response.id;
         ci_build _ = check sClient->/ci_builds/[ciBuildRecordId].put({
             ci_status: "inProgress",
             ci_build_id: ciRunId
@@ -670,7 +671,7 @@ isolated function getCustomerProductImageList(string cicdId, string customerName
 isolated function getImageNotInACR(string[] productImages) returns string[] {
     string[] productImagesNotInACR = [];
     do {
-        string[] acrImageList = check getImageInACR();
+        string[] acrImageList = getImageInACR();
 
         foreach string product in productImages {
             boolean imageInAcr = false;

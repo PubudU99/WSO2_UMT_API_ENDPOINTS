@@ -62,7 +62,7 @@ public type cicd_buildUpdate record {|
 
 public type ci_build record {|
     readonly string id;
-    string ci_build_id;
+    int ci_build_id;
     string ci_status;
     string product;
     string version;
@@ -71,7 +71,7 @@ public type ci_build record {|
 
 public type ci_buildOptionalized record {|
     string id?;
-    string ci_build_id?;
+    int ci_build_id?;
     string ci_status?;
     string product?;
     string version?;
@@ -88,7 +88,7 @@ public type ci_buildTargetType typedesc<ci_buildWithRelations>;
 public type ci_buildInsert ci_build;
 
 public type ci_buildUpdate record {|
-    string ci_build_id?;
+    int ci_build_id?;
     string ci_status?;
     string product?;
     string version?;
@@ -97,7 +97,7 @@ public type ci_buildUpdate record {|
 
 public type cd_build record {|
     readonly string id;
-    string cd_build_id;
+    int cd_build_id;
     string cd_status;
     string customer;
     string cicd_buildId;
@@ -105,7 +105,7 @@ public type cd_build record {|
 
 public type cd_buildOptionalized record {|
     string id?;
-    string cd_build_id?;
+    int cd_build_id?;
     string cd_status?;
     string customer?;
     string cicd_buildId?;
@@ -121,7 +121,7 @@ public type cd_buildTargetType typedesc<cd_buildWithRelations>;
 public type cd_buildInsert cd_build;
 
 public type cd_buildUpdate record {|
-    string cd_build_id?;
+    int cd_build_id?;
     string cd_status?;
     string customer?;
     string cicd_buildId?;

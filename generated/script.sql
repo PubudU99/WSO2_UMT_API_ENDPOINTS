@@ -27,7 +27,7 @@ CREATE TABLE `cicd_build` (
 
 CREATE TABLE `ci_build` (
 	`id` VARCHAR(191) NOT NULL,
-	`ci_build_id` VARCHAR(191) NOT NULL,
+	`ci_build_id` INT NOT NULL,
 	`ci_status` VARCHAR(191) NOT NULL,
 	`product` VARCHAR(191) NOT NULL,
 	`version` VARCHAR(191) NOT NULL,
@@ -38,7 +38,7 @@ CREATE TABLE `ci_build` (
 
 CREATE TABLE `cd_build` (
 	`id` VARCHAR(191) NOT NULL,
-	`cd_build_id` VARCHAR(191) NOT NULL,
+	`cd_build_id` INT NOT NULL,
 	`cd_status` VARCHAR(191) NOT NULL,
 	`customer` VARCHAR(191) NOT NULL,
 	`cicd_buildId` VARCHAR(191) NOT NULL,
