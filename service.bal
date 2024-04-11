@@ -28,11 +28,11 @@ service /cst on endpoint {
             check caller->respond(UUID);
             cicd_build insertCicdbuild = check insertCicdBuild(UUID);
             ci_buildInsert[] ciBuildInsertList = [];
+            string[] productsInvolved = [];
 
             if product_updates is ProductRegularUpdate[] {
                 foreach ProductRegularUpdate product in product_updates {
-                    json response = triggerAzureEndpointCiBuild(product.productName, product.productBaseversion);
-                    io:println(response);
+                    json response = triggerAzureEndpointCiBuild(product.productName, product.productBaseversion, "regular update");
                     int ciRunId = check response.id;
                     string ciRunState = check response.state;
                     ci_buildInsert tmp = {
@@ -45,37 +45,61 @@ service /cst on endpoint {
                     };
                     ciBuildInsertList.push(tmp);
                 }
-
-                string[] productsInvolved = getProductListForInvolvedCustomerUpdateLevel(product_updates);
-                string[] imagesNotInAcr = getImageNotInACR(productsInvolved);
-
-                foreach string product in imagesNotInAcr {
-                    string productName = regex:split(product, "-")[0];
-                    string productBaseversion = regex:split(product, "-")[1];
-                    string updateLevel = regex:split(product, "-")[2];
-                    json response = triggerAzureEndpointCiBuild(productName, productBaseversion, updateLevel);
-                    io:println(response);
+                productsInvolved = getProductListForInvolvedCustomerUpdateLevel(product_updates);
+            } else {
+                stream<customer, persist:Error?> customerResponseStream = sClient->/customers.get(customer, `(product_name = ${product_updates.productName} AND product_base_version = ${product_updates.productVersion}) AND customer_key = ${product_updates.customerKey}`);
+                var customerResponse = customerResponseStream.next();
+                if customerResponse !is error? {
+                    json customerResponseJson = check customerResponse.value.fromJsonWithType();
+                    string updateLevel = check customerResponseJson.u2_level;
+                    json response = triggerAzureEndpointCiBuild(product_updates.productName, product_updates.productVersion, "hotfix update", updateLevel);
                     int ciRunId = check response.id;
                     string ciRunState = check response.state;
                     ci_buildInsert tmp = {
                         id: uuid:createType4AsString(),
                         ci_build_id: ciRunId,
                         ci_status: ciRunState,
-                        product: productName,
-                        version: productBaseversion,
+                        product: product_updates.productName,
+                        version: product_updates.productVersion,
                         cicd_buildId: insertCicdbuild.id
                     };
                     ciBuildInsertList.push(tmp);
+                    productsInvolved = getProductListForInvolvedCustomerUpdateLevel([
+                        {
+                            productName: product_updates.productName,
+                            productBaseversion: product_updates.productVersion
+                        }
+                    ]);
                 }
-
-                // io:println(ciBuildInsertList);
-
-                // Trigger the pipeline for the other products which used by the customers
-
-                string[] _ = check sClient->/ci_builds.post(ciBuildInsertList);
-
             }
-        } on fail var e {
+
+            string[] imagesNotInAcr = getImageNotInACR(productsInvolved);
+
+            foreach string product in imagesNotInAcr {
+                string productName = regex:split(product, "-")[0];
+                string productBaseversion = regex:split(product, "-")[1];
+                string updateLevel = regex:split(product, "-")[2];
+                json response = triggerAzureEndpointCiBuild(productName, productBaseversion, "regular update", updateLevel);
+                io:println(response);
+                int ciRunId = check response.id;
+                string ciRunState = check response.state;
+                ci_buildInsert tmp = {
+                    id: uuid:createType4AsString(),
+                    ci_build_id: ciRunId,
+                    ci_status: ciRunState,
+                    product: productName,
+                    version: productBaseversion,
+                    cicd_buildId: insertCicdbuild.id
+                };
+                ciBuildInsertList.push(tmp);
+            }
+
+            string[] _ = check sClient->/ci_builds.post(ciBuildInsertList);
+
+            // io:println(ciBuildInsertList);
+
+        }
+        on fail var e {
             io:println("Error in resource function trigger CI builds.");
             io:println(e);
         }
@@ -104,7 +128,7 @@ service /cst on endpoint {
                         flag = false;
                         io:println(customer + " customer's CD pipline cancelled");
                         cicd_build _ = check sClient->/cicd_builds/[cicdId].put({
-                            cd_result: "failed due to ci build fail"
+                            cd_result: "failed"
                         });
                         break;
                     } else if "inProgress".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) {
@@ -116,6 +140,21 @@ service /cst on endpoint {
                 if flag {
                     updateCdResultCicdTable(cicdId);
                     insertNewCdBuilds(cicdId, customer);
+                } else {
+                    stream<cd_build, persist:Error?> cd_response = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${cicdId} and customer = ${customer}`);
+                    var cdBuildResponse = cd_response.next();
+                    if cdBuildResponse is error? {
+                        cd_buildInsert[] tmp = [
+                            {
+                                id: uuid:createType4AsString(),
+                                cd_build_id: -1,
+                                cd_status: "failed",
+                                customer: customer,
+                                cicd_buildId: cicdId
+                            }
+                        ];
+                        string[] _ = check sClient->/cd_builds.post(tmp);
+                    }
                 }
             }
         }
@@ -136,9 +175,9 @@ service /cst on endpoint {
     }
 
     isolated resource function post builds/[string cicdId]/re\-trigger() {
+        deleteFailedCdBuilds(cicdId);
         retriggerFailedCiBuilds(cicdId);
         updateCiCdStatusOnRetriggerCiBuilds(cicdId);
-        deleteFailedCdBuilds(cicdId);
     }
 
     isolated resource function post acr\-cleanup() returns error? {
@@ -178,7 +217,7 @@ service /cst on endpoint {
         }
     }
 
-    // isolated resource function get hai() returns AcrImageList|http:ClientError{
-    //     return check getAcrImageList();
-    // }
+    isolated resource function get hai() returns () {
+        return insertNewCdBuilds("3a0ca21a-8529-4530-a49e-6c2fc9c0b25f", "BNYM");
+    }
 }

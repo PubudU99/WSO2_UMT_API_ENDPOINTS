@@ -48,8 +48,9 @@ type ProductRegularUpdate record {|
 
 type ProductHotfixUpdate record {|
     string productName;
-    string productBaseVersion;
-    string u2Level;
+    string productVersion;
+    string customerKey;
+    string hotfixFilePath;
 |};
 
 type AcrImageList record {|
@@ -72,7 +73,7 @@ isolated function getRunResult(string runId) returns json {
     }
 }
 
-isolated function triggerAzureEndpointCiBuild(string product, string version, string updateLevel = "") returns json {
+isolated function triggerAzureEndpointCiBuild(string product, string version, string updateType, string updateLevel = "") returns json {
     do {
         http:Client pipeline = check pipelineEndpoint(ci_pipeline_id);
         json response;
@@ -82,7 +83,8 @@ isolated function triggerAzureEndpointCiBuild(string product, string version, st
                         product: product,
                         version: version,
                         update_level_type: "customer update level",
-                        customer_update_level: updateLevel
+                        customer_update_level: updateLevel,
+                        update_type: updateType
                     }
                 },
                 api\-version = "7.1-preview.1"
@@ -92,7 +94,8 @@ isolated function triggerAzureEndpointCiBuild(string product, string version, st
                     templateParameters: {
                         product: product,
                         version: version,
-                        update_level_type: "latest test level"
+                        update_level_type: "latest test level",
+                        update_type: updateType
                     }
 
                 },
@@ -266,7 +269,7 @@ isolated function createMapCustomerCiList(string[] product_list, map<int> mapPro
     return mapCustomerProduct;
 }
 
-isolated function getCiPendingCicdIdList( sql:ParameterizedQuery whereClause) returns string[] {
+isolated function getCiPendingCicdIdList(sql:ParameterizedQuery whereClause) returns string[] {
     string[] idList = [];
     stream<cicd_build, persist:Error?> cicdResponseStream = sClient->/cicd_builds.get(cicd_build, whereClause);
     var cicdResponse = cicdResponseStream.next();
@@ -327,31 +330,41 @@ isolated function updateCiStatusCicdTable(string[] idList) {
             stream<ci_build, persist:Error?> response = sClient->/ci_builds.get(ci_build, whereClause);
             var ciBuildResponse = response.next();
             boolean allSucceededFlag = true;
-            boolean allCompletedFlag = true;
+            // boolean allCompletedFlag = true;
+            boolean anyBuildFailed = false;
             while ciBuildResponse !is error? {
                 json ciBuildResponseJson = check ciBuildResponse.value.fromJsonWithType();
                 string ciBuildStatus = check ciBuildResponseJson.ci_status;
-                if (!ciBuildStatus.equalsIgnoreCaseAscii("succeeded") && !ciBuildStatus.equalsIgnoreCaseAscii("failed")) {
-                    allCompletedFlag = false;
-                }
+                // if (!ciBuildStatus.equalsIgnoreCaseAscii("succeeded") && !ciBuildStatus.equalsIgnoreCaseAscii("failed")) {
+                //     allCompletedFlag = false;
+                // }
                 if (!ciBuildStatus.equalsIgnoreCaseAscii("succeeded")) {
                     allSucceededFlag = false;
                 }
+                if (!ciBuildStatus.equalsIgnoreCaseAscii("failed")) {
+                    anyBuildFailed = true;
+                }
                 ciBuildResponse = response.next();
             }
-            if allCompletedFlag {
-                stream<cd_build, persist:Error?> cdResponse = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${id}`);
-                var cicdBuildResponse = check cdResponse.next();
-                if cicdBuildResponse is error? {
-                    cicd_build _ = check sClient->/cicd_builds/[id].put({
-                        ci_result: "failed",
-                        cd_result: "canceled"
-                    });
-                }
-            }
+            // if allCompletedFlag {
+            //     stream<cd_build, persist:Error?> cdResponse = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${id}`);
+            //     var cicdBuildResponse = check cdResponse.next();
+            //     if cicdBuildResponse is error? {
+            //         cicd_build _ = check sClient->/cicd_builds/[id].put({
+            //             ci_result: "failed",
+            //             cd_result: "cancelled"
+            //         });
+            //     }
+            // }
             if allSucceededFlag {
                 cicd_build _ = check sClient->/cicd_builds/[id].put({
                     ci_result: "succeeded"
+                });
+            }
+            if anyBuildFailed {
+                cicd_build _ = check sClient->/cicd_builds/[id].put({
+                    ci_result: "failed",
+                    cd_result: "cancelled"
                 });
             }
         }
@@ -452,7 +465,16 @@ isolated function retriggerFailedCiBuilds(string cicdId) {
         string ciBuildRecordId = check ciBuildRepsonseJson.id;
         string product = check ciBuildRepsonseJson.product;
         string version = check ciBuildRepsonseJson.version;
-        json response = triggerAzureEndpointCiBuild(product, version);
+        string updateType = check ciBuildRepsonseJson.update_type;
+        json response;
+        if updateType.equalsIgnoreCaseAscii("hotfix update") {
+            string ciId = check ciBuildRepsonseJson.ci_build_id;
+            json run = getRunResult(ciId.toString());
+            string updateLevel = check run.templateParameters.customer_update_level;
+            response = triggerAzureEndpointCiBuild(product, version, "hotfix update", updateLevel);
+        } else {
+            response = triggerAzureEndpointCiBuild(product, version, "regular update");
+        }
         int ciRunId = check response.id;
         ci_build _ = check sClient->/ci_builds/[ciBuildRecordId].put({
             ci_status: "inProgress",
@@ -476,7 +498,6 @@ isolated function updateCiCdStatusOnRetriggerCiBuilds(string cicdId) {
         io:println("Error in resource function update_ci_cd_status_on_retrigger_ci_builds.");
         io:println(e);
     }
-
 }
 
 isolated function deleteFailedCdBuilds(string cicdId) {
@@ -585,87 +606,120 @@ isolated function getProductListForInvolvedCustomerUpdateLevel(ProductRegularUpd
     return getUniqueList(productsInvolved);
 }
 
-isolated function getCustomerProductImageList(string cicdId, string customerName) returns string {
-    stream<customer, persist:Error?> customerResponseStream = sClient->/customers.get(customer, `(customer_key = ${customerName})`);
+isolated function getProductsWithUpdates(string cicdId) returns string[] {
+    string[] productsWithUpdates = [];
     stream<ci_build, persist:Error?> ciResponseStream = sClient->/ci_builds.get(ci_build, `cicd_buildId = ${cicdId}`);
-
-    string[] ProductsWithUpdates = [];
     var ciBuildResponse = ciResponseStream.next();
     while ciBuildResponse !is error? {
         json ciBuildResponseJson = check ciBuildResponse.value.fromJsonWithType();
         string product = check ciBuildResponseJson.product;
         string version = check ciBuildResponseJson.version;
-        ProductsWithUpdates.push(string:'join("-", product, version));
+        productsWithUpdates.push(string:'join("-", product, version));
         ciBuildResponse = ciResponseStream.next();
     } on fail var e {
-        io:println("Error in resource function getCustomerProductImageList first while.");
+        io:println("Error in resource function getProductsWithUpdates.");
         io:println(e);
     }
+    return productsWithUpdates;
+}
 
+isolated function getCustomerUsingProducts(string customerName) returns string[] {
     string[] customerUsingProducts = [];
-    string[] customerUsingProductsWithUpdateLevel = [];
+    stream<customer, persist:Error?> customerResponseStream = sClient->/customers.get(customer, `(customer_key = ${customerName})`);
     var customerResponse = customerResponseStream.next();
     while customerResponse !is error? {
         json customerResponseJson = check customerResponse.value.fromJsonWithType();
         string product = check customerResponseJson.product_name;
         string version = check customerResponseJson.product_base_version;
         customerUsingProducts.push(string:'join("-", product, version));
-        customerUsingProductsWithUpdateLevel.push(string:'join(""));
         customerResponse = customerResponseStream.next();
     } on fail var e {
-        io:println("Error in resource function getCustomerProductImageList second while.");
+        io:println("Error in resource function getCustomerUsingProducts.");
         io:println(e);
     }
+    return customerUsingProducts;
+}
 
-    string[] customerUsingProductsWithUpdates = from string productU in ProductsWithUpdates
-        join string product in customerUsingProducts on productU equals product
-        select productU;
+isolated function getCustomerUsingProductsWithoutUpdates(string[] productsWithUpdates, string[] customerUsingProducts) returns string[] {
     string[] customerUsingProductsWithoutUpdates = [];
-
-    int i = 0;
-    while (i < customerUsingProductsWithUpdates.length()) {
-        customerUsingProductsWithUpdates[i] = string:'join(".", customerUsingProductsWithUpdates[i], "test");
-        i = i + 1;
-    }
-
+    string[] customerUsingProductsWithUpdates = from string productA in productsWithUpdates
+        join string productB in customerUsingProducts on productA equals productB
+        select productA;
     foreach string product in customerUsingProducts {
         customerUsingProductsWithoutUpdates.push(product);
     }
 
-    i = 0;
+    int i = 0;
     while (i < customerUsingProducts.length()) {
         int j = 0;
         while (j < customerUsingProductsWithUpdates.length()) {
             if customerUsingProducts[i].equalsIgnoreCaseAscii(customerUsingProductsWithUpdates[j]) {
-                string _ = customerUsingProductsWithoutUpdates.remove(i);
+                customerUsingProductsWithoutUpdates[i] = "0";
             }
             j = j + 1;
         }
         i = i + 1;
     }
+    return customerUsingProductsWithoutUpdates.filter(product => product != "0");
+}
 
-    i = 0;
-    while (i < customerUsingProductsWithoutUpdates.length()) {
-        string product = customerUsingProductsWithoutUpdates[i];
+isolated function getCustomerProductImageList(string cicdId, string customerName) returns string {
+    // string[] productsWithUpdates = getProductsWithUpdates(cicdId);
+    string[] customerUsingProducts = getCustomerUsingProducts(customerName);
+    // string[] customerUsingProductsWithoutUpdates = getCustomerUsingProductsWithoutUpdates(productsWithUpdates, customerUsingProducts);
+
+    // string[] customerUsingProductsWithUpdates = from string productA in productsWithUpdates
+    //     join string productB in customerUsingProducts on productA equals productB
+    //     select productA;
+
+    // stream<customer, persist:Error?> customerResponseStream = sClient->/customers.get(customer, `(customer_key = ${customerName})`);
+    // int i = 0;
+    // while (i < customerUsingProductsWithoutUpdates.length()) {
+    //     string product = customerUsingProductsWithoutUpdates[i];
+    //     string productName = regex:split(product, "-")[0];
+    //     string version = regex:split(product, "-")[1];
+    //     customerResponseStream = sClient->/customers.get(customer, `customer_key = ${customerName} AND product_name = ${productName} AND product_base_version = ${version}`);
+    //     var customerReponse = customerResponseStream.next();
+    //     if customerReponse !is error? {
+    //         json customerReponseJson = check customerReponse.value.fromJsonWithType();
+    //         string updateLevel = check customerReponseJson.u2_level;
+    //         string tmp = string:'join(".", product, updateLevel);
+    //         customerUsingProductsWithoutUpdates[i] = tmp;
+        // }
+    //     i = i + 1;
+    // } on fail var e {
+    //     io:println("Error in resource function getCustomerProductImageList first while.");
+    //     io:println(e);
+    // }
+
+    int i = 0;
+    while (i < customerUsingProducts.length()) {
+        string product = customerUsingProducts[i];
         string productName = regex:split(product, "-")[0];
         string version = regex:split(product, "-")[1];
-        customerResponseStream = sClient->/customers.get(customer, `customer_key = ${customerName} and product_name = ${productName} and version = ${version}`);
-        var customerReponse = customerResponseStream.next();
-        if customerReponse !is error? {
-            json customerReponseJson = check customerReponse.value.fromJsonWithType();
-            string updateLevel = check customerReponseJson.u2_level;
-            string tmp = string:'join(product, updateLevel);
-            customerUsingProductsWithoutUpdates[i] = tmp;
+        stream<ci_build, persist:Error?> ciResponseStream = sClient->/ci_builds.get(ci_build, `cicd_buildId = ${cicdId} AND product = ${productName} AND version = ${version}`);
+        var ciReponse = ciResponseStream.next();
+        if ciReponse !is error? {
+            json ciReponseJson = check ciReponse.value.fromJsonWithType();
+            int ciBuildId = check ciReponseJson.ci_build_id;
+            string tmp = string:'join("-", product, ciBuildId.toString());
+            customerUsingProducts[i] = tmp;
         }
         i = i + 1;
     } on fail var e {
-        io:println("Error in resource function getCustomerProductImageList last while.");
+        io:println("Error in resource function getCustomerProductImageList second while.");
         io:println(e);
     }
 
-    string[] customerProductImages = [...customerUsingProductsWithoutUpdates, ...customerUsingProductsWithUpdates];
+    // i = 0;
+    // while (i < customerUsingProductsWithUpdates.length()) {
+    //     customerUsingProductsWithUpdates[i] = string:'join(".", customerUsingProductsWithUpdates[i], "test");
+    //     i = i + 1;
+    // }
 
-    return string:'join("|", ...customerProductImages);
+    // string[] customerProductImages = [...customerUsingProductsWithoutUpdates, ...customerUsingProductsWithUpdates];
+
+    return string:'join("|", ...customerUsingProducts);
 }
 
 isolated function getImageNotInACR(string[] productImages) returns string[] {
@@ -723,8 +777,4 @@ isolated function getProductImageForCustomerUpdateLevel() returns string[] {
         io:println(e);
     }
     return productImageListForCustomerupdateLevel;
-}
-
-isolated function getCleanupAcrImagelistMap() {
-
 }

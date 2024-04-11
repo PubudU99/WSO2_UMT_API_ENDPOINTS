@@ -27,6 +27,7 @@ public type ci_build record {|
     string ci_status;
     string product;
     string version;
+    string update_type;
 
     // many-to-one relationship with cicd_build
 	cicd_build cicd_build;
