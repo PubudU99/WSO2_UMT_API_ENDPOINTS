@@ -41,7 +41,8 @@ service /cst on endpoint {
                         ci_status: ciRunState,
                         product: product.productName,
                         version: product.productBaseversion,
-                        cicd_buildId: insertCicdbuild.id
+                        cicd_buildId: insertCicdbuild.id,
+                        update_level: "latest_test_level"
                     };
                     ciBuildInsertList.push(tmp);
                 }
@@ -61,7 +62,8 @@ service /cst on endpoint {
                         ci_status: ciRunState,
                         product: product_updates.productName,
                         version: product_updates.productVersion,
-                        cicd_buildId: insertCicdbuild.id
+                        cicd_buildId: insertCicdbuild.id,
+                        update_level: "hotfix_update_level"
                     };
                     ciBuildInsertList.push(tmp);
                     productsInvolved = getProductListForInvolvedCustomerUpdateLevel([
@@ -89,15 +91,12 @@ service /cst on endpoint {
                     ci_status: ciRunState,
                     product: productName,
                     version: productBaseversion,
-                    cicd_buildId: insertCicdbuild.id
+                    cicd_buildId: insertCicdbuild.id,
+                    update_level: updateLevel
                 };
                 ciBuildInsertList.push(tmp);
             }
-
             string[] _ = check sClient->/ci_builds.post(ciBuildInsertList);
-
-            // io:println(ciBuildInsertList);
-
         }
         on fail var e {
             io:println("Error in resource function trigger CI builds.");
@@ -120,27 +119,27 @@ service /cst on endpoint {
             string[] productList = mapProductCiId.keys();
             map<string[]> mapCustomerCiList = createMapCustomerCiList(productList, mapProductCiId);
             map<string> mapCiIdState = getMapCiIdState(mapProductCiId);
+            io:println(mapProductCiId);
+            io:println(mapCustomerCiList);
+            io:println(mapCiIdState);
+            io:println();
             foreach string customer in mapCustomerCiList.keys() {
-                boolean flag = true;
+                boolean anyBuildFailed = false;
+                boolean stillInProgress = false;
                 string[] buildIdList = <string[]>mapCustomerCiList[customer];
                 foreach string buildId in buildIdList {
-                    if "failed".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) {
-                        flag = false;
+                    if "failed".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) && !"inProgress".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) {
+                        anyBuildFailed = true;
                         io:println(customer + " customer's CD pipline cancelled");
                         cicd_build _ = check sClient->/cicd_builds/[cicdId].put({
                             cd_result: "failed"
                         });
                         break;
                     } else if "inProgress".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) {
-                        flag = false;
-                        io:println("Still building the image of customer " + customer);
-                        break;
+                        stillInProgress = true;
                     }
                 }
-                if flag {
-                    updateCdResultCicdTable(cicdId);
-                    insertNewCdBuilds(cicdId, customer);
-                } else {
+                if anyBuildFailed {
                     stream<cd_build, persist:Error?> cd_response = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${cicdId} and customer = ${customer}`);
                     var cdBuildResponse = cd_response.next();
                     if cdBuildResponse is error? {
@@ -155,6 +154,9 @@ service /cst on endpoint {
                         ];
                         string[] _ = check sClient->/cd_builds.post(tmp);
                     }
+                } else if !stillInProgress {
+                    updateCdResultCicdTable(cicdId);
+                    insertNewCdBuilds(cicdId, customer);
                 }
             }
         }

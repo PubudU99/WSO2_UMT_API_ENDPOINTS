@@ -31,6 +31,7 @@ CREATE TABLE `ci_build` (
 	`ci_status` VARCHAR(191) NOT NULL,
 	`product` VARCHAR(191) NOT NULL,
 	`version` VARCHAR(191) NOT NULL,
+	`update_level` VARCHAR(191) NOT NULL,
 	`cicd_buildId` VARCHAR(191) NOT NULL,
 	FOREIGN KEY(`cicd_buildId`) REFERENCES `cicd_build`(`id`),
 	PRIMARY KEY(`id`)

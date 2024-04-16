@@ -66,6 +66,7 @@ public type ci_build record {|
     string ci_status;
     string product;
     string version;
+    string update_level;
     string cicd_buildId;
 |};
 
@@ -75,6 +76,7 @@ public type ci_buildOptionalized record {|
     string ci_status?;
     string product?;
     string version?;
+    string update_level?;
     string cicd_buildId?;
 |};
 
@@ -92,6 +94,7 @@ public type ci_buildUpdate record {|
     string ci_status?;
     string product?;
     string version?;
+    string update_level?;
     string cicd_buildId?;
 |};
 
