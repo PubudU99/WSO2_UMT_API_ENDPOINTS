@@ -22,16 +22,16 @@ service /cst on endpoint {
             select customer;
     }
 
-    isolated resource function post builds(http:Caller caller, ProductRegularUpdate[]|ProductHotfixUpdate product_updates) {
+    isolated resource function post builds(http:Caller caller, ProductRegularUpdate[]|ProductHotfixUpdate productUpdates) {
         do {
             string UUID = uuid:createType4AsString();
             check caller->respond(UUID);
             cicd_build insertCicdbuild = check insertCicdBuild(UUID);
             ci_buildInsert[] ciBuildInsertList = [];
             string[] productsInvolved = [];
-
-            if product_updates is ProductRegularUpdate[] {
-                foreach ProductRegularUpdate product in product_updates {
+            if productUpdates is ProductRegularUpdate[] {
+                ProductRegularUpdate[] filteredProductUpdates = getFilteredProductUpdates(productUpdates);
+                foreach ProductRegularUpdate product in filteredProductUpdates {
                     json response = triggerAzureEndpointCiBuild(product.productName, product.productBaseversion, "regular update");
                     int ciRunId = check response.id;
                     string ciRunState = check response.state;
@@ -46,30 +46,30 @@ service /cst on endpoint {
                     };
                     ciBuildInsertList.push(tmp);
                 }
-                productsInvolved = getProductListForInvolvedCustomerUpdateLevel(product_updates);
+                productsInvolved = getProductListForInvolvedCustomerUpdateLevel(filteredProductUpdates);
             } else {
-                stream<customer, persist:Error?> customerResponseStream = sClient->/customers.get(customer, `(product_name = ${product_updates.productName} AND product_base_version = ${product_updates.productVersion}) AND customer_key = ${product_updates.customerKey}`);
+                stream<customer, persist:Error?> customerResponseStream = sClient->/customers.get(customer, `(product_name = ${productUpdates.productName} AND product_base_version = ${productUpdates.productVersion}) AND customer_key = ${productUpdates.customerKey}`);
                 var customerResponse = customerResponseStream.next();
                 if customerResponse !is error? {
                     json customerResponseJson = check customerResponse.value.fromJsonWithType();
                     string updateLevel = check customerResponseJson.u2_level;
-                    json response = triggerAzureEndpointCiBuild(product_updates.productName, product_updates.productVersion, "hotfix update", updateLevel);
+                    json response = triggerAzureEndpointCiBuild(productUpdates.productName, productUpdates.productVersion, "hotfix update", updateLevel);
                     int ciRunId = check response.id;
                     string ciRunState = check response.state;
                     ci_buildInsert tmp = {
                         id: uuid:createType4AsString(),
                         ci_build_id: ciRunId,
                         ci_status: ciRunState,
-                        product: product_updates.productName,
-                        version: product_updates.productVersion,
+                        product: productUpdates.productName,
+                        version: productUpdates.productVersion,
                         cicd_buildId: insertCicdbuild.id,
                         update_level: "hotfix_update_level"
                     };
                     ciBuildInsertList.push(tmp);
                     productsInvolved = getProductListForInvolvedCustomerUpdateLevel([
                         {
-                            productName: product_updates.productName,
-                            productBaseversion: product_updates.productVersion
+                            productName: productUpdates.productName,
+                            productBaseversion: productUpdates.productVersion
                         }
                     ]);
                 }
@@ -79,10 +79,10 @@ service /cst on endpoint {
 
             foreach string product in imagesNotInAcr {
                 string productName = regex:split(product, "-")[0];
-                string productBaseversion = regex:split(product, "-")[1];
-                string updateLevel = regex:split(product, "-")[2];
+                string versionWithUpdatelevel = regex:split(product, "-")[1];
+                string productBaseversion = string:'join(".", regex:split(versionWithUpdatelevel, ".")[0], regex:split(versionWithUpdatelevel, ".")[1]);
+                string updateLevel = regex:split(versionWithUpdatelevel, "-")[2];
                 json response = triggerAzureEndpointCiBuild(productName, productBaseversion, "regular update", updateLevel);
-                io:println(response);
                 int ciRunId = check response.id;
                 string ciRunState = check response.state;
                 ci_buildInsert tmp = {
@@ -119,10 +119,6 @@ service /cst on endpoint {
             string[] productList = mapProductCiId.keys();
             map<string[]> mapCustomerCiList = createMapCustomerCiList(productList, mapProductCiId);
             map<string> mapCiIdState = getMapCiIdState(mapProductCiId);
-            io:println(mapProductCiId);
-            io:println(mapCustomerCiList);
-            io:println(mapCiIdState);
-            io:println();
             foreach string customer in mapCustomerCiList.keys() {
                 boolean anyBuildFailed = false;
                 boolean stillInProgress = false;
@@ -163,6 +159,7 @@ service /cst on endpoint {
     }
     isolated resource function post builds/cd/status() returns error? {
         updateInProgressCdBuilds();
+        updateCdResultCicdParentTable();
     }
 
     isolated resource function get builds/[string cicdId]() returns Chunkinfo {
