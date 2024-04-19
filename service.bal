@@ -11,11 +11,6 @@ final Client sClient = check initializeClient();
 
 service /cst on endpoint {
 
-    isolated resource function post .(CustomerInsertCopy[] list) returns string[]|persist:Error {
-        customerInsert[] cstInfoList = getCustomersToInsert(list);
-        return sClient->/customers.post(cstInfoList);
-    }
-
     isolated resource function get customer() returns customer[]|persist:Error {
         stream<customer, persist:Error?> response = sClient->/customers;
         return check from customer customer in response
@@ -216,7 +211,4 @@ service /cst on endpoint {
         }
     }
 
-    isolated resource function get hai() returns () {
-        return insertNewCdBuilds("3a0ca21a-8529-4530-a49e-6c2fc9c0b25f", "BNYM");
-    }
 }
