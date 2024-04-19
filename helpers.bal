@@ -17,11 +17,13 @@ type CiBuildInfo record {|
     string product;
     string version;
     string status;
+    string consoleErrorUrl;
 |};
 
 type CdBuildInfo record {|
     string customer;
     string status;
+    string consoleErrorUrl;
 |};
 
 type Chunkinfo record {|
@@ -51,15 +53,69 @@ type DeletedImage record {|
     string[] tagsDeleted;
 |};
 
+type TimelineRecord record {
+    string result;
+};
+
+type TimelineTask record {
+    TimelineRecord[] records;
+};
+
+isolated function getPipelineURL(string organization, string project, string pipeline_id) returns string {
+    return "https://dev.azure.com/" + organization + "/" + project + "/_apis/pipelines/" + pipeline_id;
+}
+
+isolated function getTimelineURL(string organization, string project) returns string {
+    return "https://dev.azure.com/" + organization + "/" + project + "/_apis/build/builds";
+}
+
+isolated function runTimelineEndpoint() returns http:Client|error {
+    http:Client endpoint = check new (getTimelineURL(organization, project), {
+        auth: {
+            username: "PAT_AZURE_DEVOPS",
+            password: PAT_AZURE_DEVOPS
+        }
+    }
+    );
+    return endpoint;
+}
+
+isolated function pipelineEndpoint(string pipeline_id) returns http:Client|error {
+    http:Client endpoint = check new (getPipelineURL(organization, project, pipeline_id), {
+        auth: {
+            username: "PAT_AZURE_DEVOPS",
+            password: PAT_AZURE_DEVOPS
+        }
+    }
+    );
+    return endpoint;
+}
+
+isolated function getRunTimelineResult(string runId) returns TimelineTask|error {
+    http:Client endpoint = check runTimelineEndpoint();
+    TimelineTask response = check endpoint->/[runId]/timeline.get(api\-version = "7.0");
+    return response;
+}
+
 isolated function getRunResult(string runId) returns json {
     do {
-        http:Client pipeline = check pipelineEndpoint(ci_pipeline_id);
-        json response = check pipeline->/runs/[runId].get(api\-version = "7.1-preview.1");
+        http:Client endpoint = check pipelineEndpoint(ci_pipeline_id);
+        json response = check endpoint->/runs/[runId].get(api\-version = "7.1-preview.1");
         return response;
     } on fail var e {
         io:println("Error in function getRunResult");
         io:println(e);
     }
+}
+
+isolated function getAcrEndpoint() returns http:Client|error {
+    http:Client clientEndpoint = check new ("https://cstimage.azurecr.io/acr/v1", {
+        auth: {
+            username: acr_username,
+            password: acr_password
+        }
+    });
+    return clientEndpoint;
 }
 
 isolated function triggerAzureEndpointCiBuild(string product, string version, string updateType, string updateLevel = "") returns json {
@@ -71,7 +127,6 @@ isolated function triggerAzureEndpointCiBuild(string product, string version, st
                     templateParameters: {
                         product: product,
                         version: version,
-                        update_level: "customer update level",
                         customer_update_level: updateLevel,
                         update_type: updateType
                     }
@@ -83,7 +138,6 @@ isolated function triggerAzureEndpointCiBuild(string product, string version, st
                     templateParameters: {
                         product: product,
                         version: version,
-                        update_level: "latest test level",
                         update_type: updateType
                     }
 
@@ -181,31 +235,6 @@ isolated function createProductWhereClause(ProductRegularUpdate[] product_list) 
         i += 1;
     }
     return whereClause;
-}
-
-isolated function getPipelineURL(string organization, string project, string pipeline_id) returns string {
-    return "https://dev.azure.com/" + organization + "/" + project + "/_apis/pipelines/" + pipeline_id;
-}
-
-isolated function pipelineEndpoint(string pipeline_id) returns http:Client|error {
-    http:Client clientEndpoint = check new (getPipelineURL(organization, project, pipeline_id), {
-        auth: {
-            username: "PAT_AZURE_DEVOPS",
-            password: PAT_AZURE_DEVOPS
-        }
-    }
-    );
-    return clientEndpoint;
-}
-
-isolated function getAcrEndpoint() returns http:Client|error {
-    http:Client clientEndpoint = check new ("https://cstimage.azurecr.io/acr/v1", {
-        auth: {
-            username: acr_username,
-            password: acr_password
-        }
-    });
-    return clientEndpoint;
 }
 
 isolated function insertCicdBuild(string uuid) returns cicd_buildInsert|error {
@@ -319,6 +348,7 @@ isolated function updateCiStatusCicdTable(string[] idList) {
             var ciBuildResponse = response.next();
             boolean allSucceededFlag = true;
             boolean anyBuildFailed = false;
+            boolean stillInProgress = false;
             while ciBuildResponse !is error? {
                 json ciBuildResponseJson = check ciBuildResponse.value.fromJsonWithType();
                 string ciBuildStatus = check ciBuildResponseJson.ci_status;
@@ -330,6 +360,7 @@ isolated function updateCiStatusCicdTable(string[] idList) {
                 }
                 if (ciBuildStatus.equalsIgnoreCaseAscii("inProgress")) {
                     allSucceededFlag = false;
+                    stillInProgress = true;
                 }
                 ciBuildResponse = response.next();
             }
@@ -338,7 +369,7 @@ isolated function updateCiStatusCicdTable(string[] idList) {
                     ci_result: "succeeded"
                 });
             }
-            if anyBuildFailed {
+            if anyBuildFailed && !stillInProgress {
                 cicd_build _ = check sClient->/cicd_builds/[id].put({
                     ci_result: "failed"
                 });
@@ -378,6 +409,7 @@ isolated function updateCdResultCicdParentTable() {
             string cicdId = check cicdResponseJson.id;
             boolean allSucceededFlag = true;
             boolean anyBuildFailedFlag = false;
+            boolean stillInPrgressFlag = false;
             stream<cd_build, persist:Error?> cdResponseStream = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${cicdId}`);
             var cdResponse = cdResponseStream.next();
             while cdResponse !is error? {
@@ -390,11 +422,12 @@ isolated function updateCdResultCicdParentTable() {
                 }
                 if cdStatus.equalsIgnoreCaseAscii("inProgress") {
                     allSucceededFlag = false;
+                    stillInPrgressFlag = true;
                     break;
                 }
                 cdResponse = cdResponseStream.next();
             }
-            if anyBuildFailedFlag {
+            if anyBuildFailedFlag && !stillInPrgressFlag {
                 cicd_build _ = check sClient->/cicd_builds/[cicdId].put({
                     cd_result: "failed"
                 });
@@ -580,28 +613,34 @@ isolated function updateInProgressCdBuilds() {
 }
 
 isolated function retriggerFailedCiBuilds(string cicdId) {
-    stream<ci_build, persist:Error?> ciResponse = sClient->/ci_builds.get(ci_build, `cicd_buildId = ${cicdId} and ci_status = "failed"`);
-    var ciBuildResponse = ciResponse.next();
-    while ciBuildResponse !is error? {
-        json ciBuildRepsonseJson = check ciBuildResponse.value.fromJsonWithType();
-        string ciBuildRecordId = check ciBuildRepsonseJson.id;
-        string product = check ciBuildRepsonseJson.product;
-        string version = check ciBuildRepsonseJson.version;
-        string updateType = check ciBuildRepsonseJson.update_type;
+    stream<ci_build, persist:Error?> ciResponseStream = sClient->/ci_builds.get(ci_build, `cicd_buildId = ${cicdId} and ci_status = "failed"`);
+    var ciResponse = ciResponseStream.next();
+    while ciResponse !is error? {
+        json ciRepsonseJson = check ciResponse.value.fromJsonWithType();
+        string ciBuildRecordId = check ciRepsonseJson.id;
+        string product = check ciRepsonseJson.product;
+        string version = check ciRepsonseJson.version;
+        string updateLevel = check ciRepsonseJson.update_level;
         json response;
-        if updateType.equalsIgnoreCaseAscii("hotfix update") {
-            string ciId = check ciBuildRepsonseJson.ci_build_id;
+        if updateLevel.equalsIgnoreCaseAscii("hotfix_update_level") {
+            int ciId = check ciRepsonseJson.ci_build_id;
             json run = getRunResult(ciId.toString());
-            string updateLevel = check run.templateParameters.customer_update_level;
-            response = triggerAzureEndpointCiBuild(product, version, "hotfix update", updateLevel);
-        } else {
+            string customerUpdateLevel = check run.templateParameters.customer_update_level;
+            response = triggerAzureEndpointCiBuild(product, version, "hotfix update", customerUpdateLevel);
+        } else if updateLevel.equalsIgnoreCaseAscii("latest_test_level") {
             response = triggerAzureEndpointCiBuild(product, version, "regular update");
+        } else {
+            int ciId = check ciRepsonseJson.ci_build_id;
+            json run = getRunResult(ciId.toString());
+            string customerUpdateLevel = check run.templateParameters.customer_update_level;
+            response = triggerAzureEndpointCiBuild(product, version, "regular update", customerUpdateLevel);
         }
         int ciRunId = check response.id;
         ci_build _ = check sClient->/ci_builds/[ciBuildRecordId].put({
             ci_status: "inProgress",
             ci_build_id: ciRunId
         });
+        ciResponse = ciResponseStream.next();
     } on fail var e {
         io:println("Error in resource function retrigger_failed_ci_builds.");
         io:println(e);
@@ -616,6 +655,7 @@ isolated function updateCiCdStatusOnRetriggerCiBuilds(string cicdId) {
             ci_result: "inProgress",
             cd_result: "pending"
         });
+        cicdBuildResponse = cicdResponse.next();
     } on fail var e {
         io:println("Error in resource function update_ci_cd_status_on_retrigger_ci_builds.");
         io:println(e);
@@ -634,50 +674,6 @@ isolated function deleteFailedCdBuilds(string cicdId) {
         io:println("Error in resource function delete_failed_cd_builds.");
         io:println(e);
     }
-}
-
-isolated function getCiBuildinfo(string cicdId) returns CiBuildInfo[] {
-    CiBuildInfo[] ciBuildList = [];
-    stream<ci_build, persist:Error?> ciResponseStream = sClient->/ci_builds.get(ci_build, `cicd_buildId = ${cicdId}`);
-    var ciBuildResponse = ciResponseStream.next();
-    while ciBuildResponse !is error? {
-        json ciBuildResponseJson = check ciBuildResponse.value.fromJsonWithType();
-        string product = check ciBuildResponseJson.product;
-        string version = check ciBuildResponseJson.version;
-        string buildStatus = check ciBuildResponseJson.ci_status;
-        CiBuildInfo tmp = {
-            product: product,
-            version: version,
-            status: buildStatus
-        };
-        ciBuildList.push(tmp);
-        ciBuildResponse = ciResponseStream.next();
-    } on fail var e {
-        io:println("Error in resource function getCiBuildinfo.");
-        io:println(e);
-    }
-    return ciBuildList;
-}
-
-isolated function getCdBuildinfo(string cicdId) returns CdBuildInfo[] {
-    CdBuildInfo[] cdBuildList = [];
-    stream<cd_build, persist:Error?> cdResponseStream = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${cicdId}`);
-    var cdBuildResponse = cdResponseStream.next();
-    while cdBuildResponse !is error? {
-        json cdBuildResponseJson = check cdBuildResponse.value.fromJsonWithType();
-        string customer = check cdBuildResponseJson.customer;
-        string buildStatus = check cdBuildResponseJson.cd_status;
-        CdBuildInfo tmp = {
-            customer: customer,
-            status: buildStatus
-        };
-        cdBuildList.push(tmp);
-        cdBuildResponse = cdResponseStream.next();
-    } on fail var e {
-        io:println("Error in resource function getCdBuildinfo.");
-        io:println(e);
-    }
-    return cdBuildList;
 }
 
 isolated function getUniqueList(string[] s) returns string[] {
@@ -736,46 +732,6 @@ isolated function getProductListForInvolvedCustomerUpdateLevel(ProductRegularUpd
     return getUniqueList(productsInvolved);
 }
 
-isolated function getProductsWithUpdates(string cicdId) returns string[] {
-    string[] productsWithUpdates = [];
-    stream<ci_build, persist:Error?> ciResponseStream = sClient->/ci_builds.get(ci_build, `cicd_buildId = ${cicdId}`);
-    var ciBuildResponse = ciResponseStream.next();
-    while ciBuildResponse !is error? {
-        json ciBuildResponseJson = check ciBuildResponse.value.fromJsonWithType();
-        string product = check ciBuildResponseJson.product;
-        string version = check ciBuildResponseJson.version;
-        productsWithUpdates.push(string:'join("-", product, version));
-        ciBuildResponse = ciResponseStream.next();
-    } on fail var e {
-        io:println("Error in resource function getProductsWithUpdates.");
-        io:println(e);
-    }
-    return productsWithUpdates;
-}
-
-isolated function getCustomerUsingProductsWithoutUpdates(string[] productsWithUpdates, string[] customerUsingProducts) returns string[] {
-    string[] customerUsingProductsWithoutUpdates = [];
-    string[] customerUsingProductsWithUpdates = from string productA in productsWithUpdates
-        join string productB in customerUsingProducts on productA equals productB
-        select productA;
-    foreach string product in customerUsingProducts {
-        customerUsingProductsWithoutUpdates.push(product);
-    }
-
-    int i = 0;
-    while (i < customerUsingProducts.length()) {
-        int j = 0;
-        while (j < customerUsingProductsWithUpdates.length()) {
-            if customerUsingProducts[i].equalsIgnoreCaseAscii(customerUsingProductsWithUpdates[j]) {
-                customerUsingProductsWithoutUpdates[i] = "0";
-            }
-            j = j + 1;
-        }
-        i = i + 1;
-    }
-    return customerUsingProductsWithoutUpdates.filter(product => product != "0");
-}
-
 isolated function getImageNotInACR(string[] productImages) returns string[] {
     string[] productImagesNotInACR = [];
     do {
@@ -820,7 +776,7 @@ isolated function getProductImageForCustomerUpdateLevel() returns string[] {
     while customerStreamItem !is error? {
         json customer = check customerStreamItem.value.fromJsonWithType();
         string productName = check customer.product_name;
-        string version = check customer.product_base_vesion;
+        string version = check customer.product_base_version;
         string updateLevel = check customer.u2_level;
         string imageName = string:'join("-", productName, string:'join(".", version, updateLevel));
         productImageListForCustomerupdateLevel.push(imageName);
@@ -842,4 +798,70 @@ isolated function getFilteredProductUpdates(ProductRegularUpdate[] productList) 
         }
     }
     return filteredProducts;
+}
+
+isolated function getCiBuildinfo(string cicdId) returns CiBuildInfo[] {
+    CiBuildInfo[] ciBuildList = [];
+    stream<ci_build, persist:Error?> ciResponseStream = sClient->/ci_builds.get(ci_build, `cicd_buildId = ${cicdId}`);
+    var ciBuildResponse = ciResponseStream.next();
+    while ciBuildResponse !is error? {
+        json ciBuildResponseJson = check ciBuildResponse.value.fromJsonWithType();
+        string product = check ciBuildResponseJson.product;
+        string version = check ciBuildResponseJson.version;
+        string buildStatus = check ciBuildResponseJson.ci_status;
+        int ciBuildId = check ciBuildResponseJson.ci_build_id;
+        string consoleErrorUrl = "";
+        if buildStatus.equalsIgnoreCaseAscii("failed") {
+            TimelineTask runTimelineResult = check getRunTimelineResult(ciBuildId.toString());
+            TimelineRecord[] runTimelineRecordList = runTimelineResult.records;
+            TimelineRecord[] failedRunTimelineRecordList = runTimelineRecordList.filter(item => item.result == "failed");
+            consoleErrorUrl = check failedRunTimelineRecordList[0].toJson().log.url;
+        }
+        CiBuildInfo tmp = {
+            product: product,
+            version: version,
+            status: buildStatus,
+            consoleErrorUrl: consoleErrorUrl
+        };
+        ciBuildList.push(tmp);
+        ciBuildResponse = ciResponseStream.next();
+    } on fail var e {
+        io:println("Error in resource function getCiBuildinfo.");
+        io:println(e);
+    }
+    return ciBuildList;
+}
+
+isolated function getCdBuildinfo(string cicdId) returns CdBuildInfo[]|error {
+    CdBuildInfo[] cdBuildList = [];
+    stream<cd_build, persist:Error?> cdResponseStream = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${cicdId}`);
+    var cdBuildResponse = cdResponseStream.next();
+    while cdBuildResponse !is error? {
+        json cdBuildResponseJson = check cdBuildResponse.value.fromJsonWithType();
+        string customer = check cdBuildResponseJson.customer;
+        string buildStatus = check cdBuildResponseJson.cd_status;
+        int cdBuildId = check cdBuildResponseJson.cd_build_id;
+        string consoleErrorUrl = "";
+        if buildStatus.equalsIgnoreCaseAscii("failed") {
+            if cdBuildId == -1 {
+                consoleErrorUrl = "Related CI builds failed";
+            } else {
+                TimelineTask runTimelineResult = check getRunTimelineResult(cdBuildId.toString());
+                TimelineRecord[] runTimelineRecordList = runTimelineResult.records;
+                TimelineRecord[] failedRunTimelineRecordList = runTimelineRecordList.filter(item => item.result == "failed");
+                consoleErrorUrl = check failedRunTimelineRecordList[0].toJson().log.url;
+            }
+        }
+        CdBuildInfo tmp = {
+            customer: customer,
+            status: buildStatus,
+            consoleErrorUrl: consoleErrorUrl
+        };
+        cdBuildList.push(tmp);
+        cdBuildResponse = cdResponseStream.next();
+    } on fail var e {
+        io:println("Error in resource function getCdBuildinfo.");
+        io:println(e);
+    }
+    return cdBuildList;
 }
