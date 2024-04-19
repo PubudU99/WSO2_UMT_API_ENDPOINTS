@@ -11,10 +11,6 @@ final Client sClient = check initializeClient();
 
 service /cst on endpoint {
 
-    isolated resource function post .(CustomerInsertCopy[] list) returns string[]|persist:Error {
-        customerInsert[] cstInfoList = getCustomersToInsert(list);
-        return sClient->/customers.post(cstInfoList);
-    }
 
     isolated resource function get customer() returns customer[]|persist:Error {
         stream<customer, persist:Error?> response = sClient->/customers;
@@ -80,8 +76,9 @@ service /cst on endpoint {
             foreach string product in imagesNotInAcr {
                 string productName = regex:split(product, "-")[0];
                 string versionWithUpdatelevel = regex:split(product, "-")[1];
-                string productBaseversion = string:'join(".", regex:split(versionWithUpdatelevel, ".")[0], regex:split(versionWithUpdatelevel, ".")[1]);
-                string updateLevel = regex:split(versionWithUpdatelevel, "-")[2];
+                versionWithUpdatelevel = regex:replaceAll(versionWithUpdatelevel, "[.]", ",");
+                string productBaseversion = string:'join(".", regex:split(versionWithUpdatelevel, ",")[0], regex:split(versionWithUpdatelevel, ",")[1], regex:split(versionWithUpdatelevel, ",")[2]);
+                string updateLevel = regex:split(versionWithUpdatelevel, ",")[3];
                 json response = triggerAzureEndpointCiBuild(productName, productBaseversion, "regular update", updateLevel);
                 int ciRunId = check response.id;
                 string ciRunState = check response.state;
@@ -121,18 +118,15 @@ service /cst on endpoint {
             map<string> mapCiIdState = getMapCiIdState(mapProductCiId);
             foreach string customer in mapCustomerCiList.keys() {
                 boolean anyBuildFailed = false;
-                boolean stillInProgress = false;
+                boolean anyBuildStillInProgress = false;
                 string[] buildIdList = <string[]>mapCustomerCiList[customer];
                 foreach string buildId in buildIdList {
                     if "failed".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) && !"inProgress".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) {
                         anyBuildFailed = true;
                         io:println(customer + " customer's CD pipline cancelled");
-                        cicd_build _ = check sClient->/cicd_builds/[cicdId].put({
-                            cd_result: "failed"
-                        });
                         break;
                     } else if "inProgress".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) {
-                        stillInProgress = true;
+                        anyBuildStillInProgress = true;
                     }
                 }
                 if anyBuildFailed {
@@ -149,8 +143,9 @@ service /cst on endpoint {
                             }
                         ];
                         string[] _ = check sClient->/cd_builds.post(tmp);
+                        updateCdResultCicdParentTable();
                     }
-                } else if !stillInProgress {
+                } else if !anyBuildStillInProgress {
                     updateCdResultCicdTable(cicdId);
                     insertNewCdBuilds(cicdId, customer);
                 }
@@ -162,9 +157,9 @@ service /cst on endpoint {
         updateCdResultCicdParentTable();
     }
 
-    isolated resource function get builds/[string cicdId]() returns Chunkinfo {
+    isolated resource function get builds/[string cicdId]() returns Chunkinfo|error {
         CiBuildInfo[] ciBuild = getCiBuildinfo(cicdId);
-        CdBuildInfo[] cdBuild = getCdBuildinfo(cicdId);
+        CdBuildInfo[] cdBuild = check getCdBuildinfo(cicdId);
         Chunkinfo chunkInfo = {
             id: cicdId,
             ciBuild: ciBuild,
@@ -196,14 +191,16 @@ service /cst on endpoint {
             }
         }
 
+        string[] imagesInLatestTestLevel = acrImageList.filter(image => regex:split(image, "-").length() > 2).sort("descending", isolated function(string val) returns string => re `.*-(\d)`.replace(val, "$1"));
+
         // Mark the last 5 images created as true
-        int imageLength = acrImageList.length();
+        int imageLength = imagesInLatestTestLevel.length();
         if imageLength > 5 {
-            acrImageListMap[acrImageList[imageLength - 1]] = true;
-            acrImageListMap[acrImageList[imageLength - 2]] = true;
-            acrImageListMap[acrImageList[imageLength - 3]] = true;
-            acrImageListMap[acrImageList[imageLength - 4]] = true;
-            acrImageListMap[acrImageList[imageLength - 5]] = true;
+            acrImageListMap[imagesInLatestTestLevel[0]] = true;
+            acrImageListMap[imagesInLatestTestLevel[1]] = true;
+            acrImageListMap[imagesInLatestTestLevel[2]] = true;
+            acrImageListMap[imagesInLatestTestLevel[3]] = true;
+            acrImageListMap[imagesInLatestTestLevel[4]] = true;
         }
 
         // Filter the images which are in value false that need to be deleted
@@ -216,7 +213,4 @@ service /cst on endpoint {
         }
     }
 
-    isolated resource function get hai() returns () {
-        return insertNewCdBuilds("3a0ca21a-8529-4530-a49e-6c2fc9c0b25f", "BNYM");
-    }
 }
