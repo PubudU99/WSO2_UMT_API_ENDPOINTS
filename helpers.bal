@@ -5,62 +5,6 @@ import ballerina/regex;
 import ballerina/sql;
 import ballerina/uuid;
 
-type CustomerInsertCopy record {|
-    string customerKey;
-    string environment;
-    string productName;
-    string productBaseversion;
-    string u2Level;
-|};
-
-type CiBuildInfo record {|
-    string product;
-    string version;
-    string status;
-    string consoleErrorUrl;
-|};
-
-type CdBuildInfo record {|
-    string customer;
-    string status;
-    string consoleErrorUrl;
-|};
-
-type Chunkinfo record {|
-    string id;
-    CiBuildInfo[] ciBuild;
-    CdBuildInfo[] cdBuild;
-|};
-
-type ProductRegularUpdate record {|
-    string productName;
-    string productBaseversion;
-|};
-
-type ProductHotfixUpdate record {|
-    string productName;
-    string productVersion;
-    string customerKey;
-    string hotfixFilePath;
-|};
-
-type AcrImageList record {|
-    string[]|() repositories;
-|};
-
-type DeletedImage record {|
-    string[] manifestsDeleted;
-    string[] tagsDeleted;
-|};
-
-type TimelineRecord record {
-    string result;
-};
-
-type TimelineTask record {
-    TimelineRecord[] records;
-};
-
 isolated function getPipelineURL(string organization, string project, string pipeline_id) returns string {
     return "https://dev.azure.com/" + organization + "/" + project + "/_apis/pipelines/" + pipeline_id;
 }
