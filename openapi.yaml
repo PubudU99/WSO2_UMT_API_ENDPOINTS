@@ -42,7 +42,19 @@ info:
     
   version: 1.0.11
 servers:
-  - url: http://localhost:5000/cst
+  - url: http://localhost:5000/cst\
+
+components:
+  securitySchemes:
+    oauth2sample:
+      type: oauth2
+      flows: 
+        authorizationCode:
+          authorizationUrl: https://api.asgardeo.io/t/wso2/oauth2/authorize
+          tokenUrl: https://api.asgardeo.io/t/wso2/oauth2/token
+          scopes:
+            accessTable: access tables
+            umtEndpoints: use endpoints
 
 tags:
   - name: cst
@@ -82,6 +94,9 @@ paths:
           description: Invalid input
         '422':
           description: Validation exception
+      security:
+        - oauth2sample: [umtEndpoints]
+      
   "/builds":
     post:
       tags:
@@ -127,6 +142,8 @@ paths:
                 type: string
                 example:
                   i942c46f6-20bb-4f4c-a5e6-9a6b8e28ff9f
+      security:
+        - oauth2sample: [umtEndpoints]
   "/builds/ci/status":
     post:
       tags:
@@ -138,6 +155,8 @@ paths:
           description: Invalid input
         '422':
           description: Validation exception
+      security:
+        - oauth2sample: [accessTable]
   "/builds/cd/trigger":
     post:
       tags:
@@ -149,6 +168,8 @@ paths:
           description: Invalid input
         '422':
           description: Validation exception
+      security:
+        - oauth2sample: [accessTable]
   "/builds/cd/status":
     post:
       tags:
@@ -160,6 +181,8 @@ paths:
           description: Invalid input
         '422':
           description: Validation exception
+      security:
+        - oauth2sample: [accessTable]
   "/builds/{cicdId}":
     get:
       tags:
@@ -177,6 +200,8 @@ paths:
       responses:
         '400':
           description: Invalid cicdId value
+      security:
+        - oauth2sample: [umtEndpoints]
   "/builds/{cicdId}/re-trigger":
       post:
         tags:
@@ -194,6 +219,8 @@ paths:
         responses:
           '400':
             description: Invalid cicdId value
+        security:
+        - oauth2sample: [umtEndpoints]
   "/acr-cleanup":
       post:
         tags:
@@ -205,5 +232,7 @@ paths:
             description: Invalid input
           '422':
             description: Validation exception
+        security:
+        - oauth2sample: [umtEndpoints]
                   
 
