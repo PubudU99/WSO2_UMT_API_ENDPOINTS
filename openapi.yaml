@@ -192,11 +192,10 @@ paths:
       parameters:
         - name: cicdId
           in: path
-          description: Pet id to delete
+          description: cicdId to delete
           required: true
           schema:
-            type: integer
-            format: int64
+            type: string
       responses:
         '400':
           description: Invalid cicdId value
@@ -214,8 +213,7 @@ paths:
             description: Pet id to delete
             required: true
             schema:
-              type: integer
-              format: int64
+              type: string
         responses:
           '400':
             description: Invalid cicdId value
