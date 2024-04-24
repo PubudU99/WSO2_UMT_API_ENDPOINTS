@@ -43,7 +43,7 @@ isolated function getRunTimelineResult(string runId) returns TimelineTask|error 
 
 isolated function getRunResult(string runId) returns json {
     do {
-        http:Client endpoint = check pipelineEndpoint(ci_pipeline_id);
+        http:Client endpoint = check pipelineEndpoint(ciPipelineId);
         json response = check endpoint->/runs/[runId].get(api\-version = "7.1-preview.1");
         return response;
     } on fail var e {
@@ -55,8 +55,8 @@ isolated function getRunResult(string runId) returns json {
 isolated function getAcrEndpoint() returns http:Client|error {
     http:Client clientEndpoint = check new ("https://cstimage.azurecr.io/acr/v1", {
         auth: {
-            username: acr_username,
-            password: acr_password
+            username: acrUsername,
+            password: acrPassword
         }
     });
     return clientEndpoint;
@@ -64,7 +64,7 @@ isolated function getAcrEndpoint() returns http:Client|error {
 
 isolated function triggerAzureEndpointCiBuild(string product, string version, string updateType, string updateLevel = "") returns json {
     do {
-        http:Client pipeline = check pipelineEndpoint(ci_pipeline_id);
+        http:Client pipeline = check pipelineEndpoint(ciPipelineId);
         json response;
         if !updateLevel.equalsIgnoreCaseAscii("") {
             response = check pipeline->/runs.post({
@@ -98,7 +98,7 @@ isolated function triggerAzureEndpointCiBuild(string product, string version, st
 
 isolated function triggerAzureEndpointCdBuild(string customer, string helmOverideValuesString) returns json {
     do {
-        http:Client pipeline = check pipelineEndpoint(cd_pipeline_id);
+        http:Client pipeline = check pipelineEndpoint(cdPipelineId);
         json response = check pipeline->/runs.post({
                 templateParameters: {
                     customer: customer,
@@ -248,7 +248,7 @@ isolated function getCiPendingCicdIdList(sql:ParameterizedQuery whereClause) ret
 
 isolated function updateCiStatus(string[] idList) {
     do {
-        http:Client pipeline = check pipelineEndpoint(ci_pipeline_id);
+        http:Client pipeline = check pipelineEndpoint(ciPipelineId);
         sql:ParameterizedQuery whereClause = ``;
         int i = 0;
         foreach string id in idList {

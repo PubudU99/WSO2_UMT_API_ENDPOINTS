@@ -1,3 +1,4 @@
+import ballerina/auth;
 import ballerina/http;
 import ballerina/io;
 import ballerina/persist;
@@ -8,6 +9,9 @@ import ballerina/uuid;
 listener http:Listener endpoint = new (5000);
 
 final Client sClient = check initializeClient();
+
+http:FileUserStoreConfig config = {};
+http:ListenerFileUserStoreBasicAuthHandler handler = new (config);
 
 service /cst on endpoint {
 
@@ -100,60 +104,78 @@ service /cst on endpoint {
         }
     }
 
-    isolated resource function post builds/ci/status() returns error? {
-        sql:ParameterizedQuery whereClause = `ci_result = "inProgress"`;
-        string[] CiPendingCicdIdList = getCiPendingCicdIdList(whereClause);
-        updateCiStatus(CiPendingCicdIdList);
-        updateCiStatusCicdTable(CiPendingCicdIdList);
+    resource function post builds/ci/status(@http:Header string? authorization) returns error? {
+        auth:UserDetails|http:Unauthorized authn = handler.authenticate(authorization is () ? "" : authorization);
+        if authn is auth:UserDetails {
+            sql:ParameterizedQuery whereClause = `ci_result = "inProgress"`;
+            string[] CiPendingCicdIdList = getCiPendingCicdIdList(whereClause);
+            updateCiStatus(CiPendingCicdIdList);
+            updateCiStatusCicdTable(CiPendingCicdIdList);
+        }
     }
 
-    isolated resource function post builds/cd/trigger() returns error? {
-        sql:ParameterizedQuery whereClause = `ci_result = "inProgress" OR ci_result = "succeeded"`;
-        string[] CiPendingCicdIdList = getCiPendingCicdIdList(whereClause);
-        foreach string cicdId in CiPendingCicdIdList {
-            map<int> mapProductCiId = getMapProductCiId(cicdId);
-            string[] productList = mapProductCiId.keys();
-            map<string[]> mapCustomerCiList = createMapCustomerCiList(productList, mapProductCiId);
-            map<string> mapCiIdState = getMapCiIdState(mapProductCiId);
-            foreach string customer in mapCustomerCiList.keys() {
-                boolean anyBuildFailed = false;
-                boolean anyBuildStillInProgress = false;
-                string[] buildIdList = <string[]>mapCustomerCiList[customer];
-                foreach string buildId in buildIdList {
-                    if "failed".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) && !"inProgress".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) {
-                        anyBuildFailed = true;
-                        io:println(customer + " customer's CD pipline cancelled");
-                        break;
-                    } else if "inProgress".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) {
-                        anyBuildStillInProgress = true;
+    resource function post builds/cd/trigger(@http:Header string? authorization) returns error? {
+        auth:UserDetails|http:Unauthorized authn = handler.authenticate(authorization is () ? "" : authorization);
+        if authn is auth:UserDetails {
+            sql:ParameterizedQuery whereClause = `ci_result = "inProgress" OR ci_result = "succeeded"`;
+            string[] CiPendingCicdIdList = getCiPendingCicdIdList(whereClause);
+            foreach string cicdId in CiPendingCicdIdList {
+                map<int> mapProductCiId = getMapProductCiId(cicdId);
+                string[] productList = mapProductCiId.keys();
+                map<string[]> mapCustomerCiList = createMapCustomerCiList(productList, mapProductCiId);
+                map<string> mapCiIdState = getMapCiIdState(mapProductCiId);
+                foreach string customer in mapCustomerCiList.keys() {
+                    boolean anyBuildFailed = false;
+                    boolean anyBuildStillInProgress = false;
+                    string[] buildIdList = <string[]>mapCustomerCiList[customer];
+                    foreach string buildId in buildIdList {
+                        if "failed".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) && !"inProgress".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) {
+                            anyBuildFailed = true;
+                            io:println(customer + " customer's CD pipline cancelled");
+                            break;
+                        } else if "inProgress".equalsIgnoreCaseAscii(mapCiIdState.get(buildId)) {
+                            anyBuildStillInProgress = true;
+                        }
                     }
-                }
-                if anyBuildFailed {
-                    stream<cd_build, persist:Error?> cd_response = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${cicdId} and customer = ${customer}`);
-                    var cdBuildResponse = cd_response.next();
-                    if cdBuildResponse is error? {
-                        cd_buildInsert[] tmp = [
-                            {
-                                id: uuid:createType4AsString(),
-                                cd_build_id: -1,
-                                cd_status: "failed",
-                                customer: customer,
-                                cicd_buildId: cicdId
-                            }
-                        ];
-                        string[] _ = check sClient->/cd_builds.post(tmp);
-                        updateCdResultCicdParentTable();
+                    if anyBuildFailed {
+                        stream<cd_build, persist:Error?> cd_response = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${cicdId} and customer = ${customer}`);
+                        var cdBuildResponse = cd_response.next();
+                        if cdBuildResponse is error? {
+                            cd_buildInsert[] tmp = [
+                                {
+                                    id: uuid:createType4AsString(),
+                                    cd_build_id: -1,
+                                    cd_status: "failed",
+                                    customer: customer,
+                                    cicd_buildId: cicdId
+                                }
+                            ];
+                            string[] _ = check sClient->/cd_builds.post(tmp);
+                            updateCdResultCicdParentTable();
+                        }
+                    } else if !anyBuildStillInProgress {
+                        updateCdResultCicdTable(cicdId);
+                        insertNewCdBuilds(cicdId, customer);
                     }
-                } else if !anyBuildStillInProgress {
-                    updateCdResultCicdTable(cicdId);
-                    insertNewCdBuilds(cicdId, customer);
                 }
             }
         }
     }
-    isolated resource function post builds/cd/status() returns error? {
-        updateInProgressCdBuilds();
-        updateCdResultCicdParentTable();
+    resource function post builds/cd/status(@http:Header string? authorization) returns error? {
+        auth:UserDetails|http:Unauthorized authn = handler.authenticate(authorization is () ? "" : authorization);
+        if authn is auth:UserDetails {
+            updateInProgressCdBuilds();
+            updateCdResultCicdParentTable();
+        }
+    }
+
+    resource function get hai(@http:Header string? authorization) returns string {
+        string customerId = "";
+        auth:UserDetails|http:Unauthorized authn = handler.authenticate(authorization is () ? "" : authorization);
+        if authn is auth:UserDetails {
+            customerId = authn.username;
+        }
+        return customerId;
     }
 
     isolated resource function get builds/[string cicdId]() returns Chunkinfo|error {
