@@ -10,8 +10,7 @@ listener http:Listener endpoint = new (5000);
 
 final Client sClient = check initializeClient();
 
-http:FileUserStoreConfig config = {};
-http:ListenerFileUserStoreBasicAuthHandler handler = new (config);
+
 
 service /cst on endpoint {
 
@@ -104,7 +103,9 @@ service /cst on endpoint {
         }
     }
 
-    resource function post builds/ci/status(@http:Header string? authorization) returns error? {
+    isolated resource function post builds/ci/status(@http:Header string? authorization) returns error? {
+        http:FileUserStoreConfig config = {};
+        http:ListenerFileUserStoreBasicAuthHandler handler = new (config);
         auth:UserDetails|http:Unauthorized authn = handler.authenticate(authorization is () ? "" : authorization);
         if authn is auth:UserDetails {
             sql:ParameterizedQuery whereClause = `ci_result = "inProgress"`;
@@ -114,7 +115,9 @@ service /cst on endpoint {
         }
     }
 
-    resource function post builds/cd/trigger(@http:Header string? authorization) returns error? {
+    isolated resource function post builds/cd/trigger(@http:Header string? authorization) returns error? {
+        http:FileUserStoreConfig config = {};
+        http:ListenerFileUserStoreBasicAuthHandler handler = new (config);
         auth:UserDetails|http:Unauthorized authn = handler.authenticate(authorization is () ? "" : authorization);
         if authn is auth:UserDetails {
             sql:ParameterizedQuery whereClause = `ci_result = "inProgress" OR ci_result = "succeeded"`;
@@ -161,7 +164,9 @@ service /cst on endpoint {
             }
         }
     }
-    resource function post builds/cd/status(@http:Header string? authorization) returns error? {
+    isolated resource function post builds/cd/status(@http:Header string? authorization) returns error? {
+        http:FileUserStoreConfig config = {};
+        http:ListenerFileUserStoreBasicAuthHandler handler = new (config);
         auth:UserDetails|http:Unauthorized authn = handler.authenticate(authorization is () ? "" : authorization);
         if authn is auth:UserDetails {
             updateInProgressCdBuilds();
@@ -169,7 +174,9 @@ service /cst on endpoint {
         }
     }
 
-    resource function get hai(@http:Header string? authorization) returns string {
+    isolated resource function get hai(@http:Header string? authorization) returns string {
+        http:FileUserStoreConfig config = {};
+        http:ListenerFileUserStoreBasicAuthHandler handler = new (config);
         string customerId = "";
         auth:UserDetails|http:Unauthorized authn = handler.authenticate(authorization is () ? "" : authorization);
         if authn is auth:UserDetails {
