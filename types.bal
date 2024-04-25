@@ -53,16 +53,3 @@ type TimelineRecord record {
 type TimelineTask record {
     TimelineRecord[] records;
 };
-
-type users record {|
-    string username;
-    string password;
-|};
-
-type auth record {|
-    users users;
-|};
-
-type ballerina record {|
-    auth auth;
-|};

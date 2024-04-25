@@ -101,24 +101,22 @@ service /cst on endpoint {
         }
     }
 
-    isolated resource function post builds/ci/status(@http:Header string? authorization) returns auth:UserDetails|http:Unauthorized {
-        http:FileUserStoreConfig config = {};
-        http:ListenerFileUserStoreBasicAuthHandler handler = new (config);
-        auth:UserDetails|http:Unauthorized authn = handler.authenticate(authorization is () ? "" : authorization);
-        if authn is auth:UserDetails {
+    isolated resource function post builds/ci/status(@http:Header string? authorization) returns http:Unauthorized & readonly|http:Ok & readonly|error {
+        [string, string] [username, password] = check auth:extractUsernameAndPassword(regex:split(<string>authorization, " ")[1]);
+        if (username == basicAuthUsername && password == basicAuthPassword) {
             sql:ParameterizedQuery whereClause = `ci_result = "inProgress"`;
             string[] CiPendingCicdIdList = getCiPendingCicdIdList(whereClause);
             updateCiStatus(CiPendingCicdIdList);
             updateCiStatusCicdTable(CiPendingCicdIdList);
+            return http:OK;
+        } else {
+            return http:UNAUTHORIZED;
         }
-        return authn;
     }
 
-    isolated resource function post builds/cd/trigger(@http:Header string? authorization) returns auth:UserDetails|http:Unauthorized {
-        http:FileUserStoreConfig config = {};
-        http:ListenerFileUserStoreBasicAuthHandler handler = new (config);
-        auth:UserDetails|http:Unauthorized authn = handler.authenticate(authorization is () ? "" : authorization);
-        if authn is auth:UserDetails {
+    isolated resource function post builds/cd/trigger(@http:Header string? authorization) returns http:Unauthorized & readonly|http:Ok & readonly|error {
+        [string, string] [username, password] = check auth:extractUsernameAndPassword(regex:split(<string>authorization, " ")[1]);
+        if (username == basicAuthUsername && password == basicAuthPassword) {
             sql:ParameterizedQuery whereClause = `ci_result = "inProgress" OR ci_result = "succeeded"`;
             string[] CiPendingCicdIdList = getCiPendingCicdIdList(whereClause);
             foreach string cicdId in CiPendingCicdIdList {
@@ -164,25 +162,30 @@ service /cst on endpoint {
                     io:println(e);
                 }
             }
+            return http:OK;
+        } else {
+            return http:UNAUTHORIZED;
         }
-        return authn;
     }
-    isolated resource function post builds/cd/status(@http:Header string? authorization) returns auth:UserDetails|http:Unauthorized {
-        http:FileUserStoreConfig config = {};
-        http:ListenerFileUserStoreBasicAuthHandler handler = new (config);
-        auth:UserDetails|http:Unauthorized authn = handler.authenticate(authorization is () ? "" : authorization);
-        if authn is auth:UserDetails {
+    isolated resource function post builds/cd/status(@http:Header string? authorization) returns http:Unauthorized & readonly|http:Ok & readonly|error {
+        [string, string] [username, password] = check auth:extractUsernameAndPassword(regex:split(<string>authorization, " ")[1]);
+        if (username == basicAuthUsername && password == basicAuthPassword) {
             updateInProgressCdBuilds();
             updateCdResultCicdParentTable();
+            return http:OK;
+        } else {
+            return http:UNAUTHORIZED;
         }
-        return authn;
     }
 
-    isolated resource function get hai(@http:Header string? authorization) returns auth:UserDetails|http:Unauthorized {
-        http:FileUserStoreConfig config = {};
-        http:ListenerFileUserStoreBasicAuthHandler handler = new (config);
-        auth:UserDetails|http:Unauthorized authn = handler.authenticate(authorization is () ? "" : authorization);
-        return authn;
+    isolated resource function get hai(@http:Header string? authorization) returns http:Unauthorized & readonly|http:Ok & readonly|error {
+        [string, string] [username, password] = check auth:extractUsernameAndPassword(regex:split(<string>authorization, " ")[1]);
+        if (username == basicAuthUsername && password == basicAuthPassword) {
+            io:println(username + " " + password);
+            return http:OK;
+        } else {
+            return http:UNAUTHORIZED;
+        }
     }
 
     isolated resource function get builds/[string cicdId]() returns Chunkinfo|error {
