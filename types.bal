@@ -63,6 +63,6 @@ type auth record {|
     users users;
 |};
 
-type bal record {|
+type ballerina record {|
     auth auth;
 |};

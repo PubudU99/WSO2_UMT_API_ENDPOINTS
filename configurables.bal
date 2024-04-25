@@ -10,4 +10,4 @@ configurable string acrUsername = ?;
 configurable string acrPassword = ?;
 
 # Basic authentication object
-configurable bal ballerina = ?;
+configurable ballerina bal = ?;
