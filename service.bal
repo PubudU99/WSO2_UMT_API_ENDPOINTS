@@ -178,17 +178,11 @@ service /cst on endpoint {
         return authn;
     }
 
-    isolated resource function get hai(@http:Header string? authorization) returns string|http:Unauthorized {
+    isolated resource function get hai(@http:Header string? authorization) returns auth:UserDetails|http:Unauthorized {
         http:FileUserStoreConfig config = {};
         http:ListenerFileUserStoreBasicAuthHandler handler = new (config);
-        string customerId = "";
         auth:UserDetails|http:Unauthorized authn = handler.authenticate(authorization is () ? "" : authorization);
-        if authn is auth:UserDetails {
-            customerId = authn.username;
-            return customerId;
-        } else {
-            return authn;
-        }
+        return authn;
     }
 
     isolated resource function get builds/[string cicdId]() returns Chunkinfo|error {
