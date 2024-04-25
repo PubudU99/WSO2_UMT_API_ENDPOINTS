@@ -233,7 +233,7 @@ paths:
         security:
         - oauth2sample: [umtEndpoints]
   "/hai":
-      post:
+      get:
         tags:
           - cst
         responses:
