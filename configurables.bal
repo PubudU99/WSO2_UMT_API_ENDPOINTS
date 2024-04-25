@@ -9,4 +9,5 @@ configurable string PAT_AZURE_DEVOPS = ?;
 configurable string acrUsername = ?;
 configurable string acrPassword = ?;
 
-configurable ballerina bal = ?;
+# Basic authentication object
+configurable bal ballerina = ?;

@@ -10,8 +10,6 @@ listener http:Listener endpoint = new (5000);
 
 final Client sClient = check initializeClient();
 
-
-
 service /cst on endpoint {
 
     isolated resource function get customer() returns customer[]|persist:Error {
@@ -103,7 +101,7 @@ service /cst on endpoint {
         }
     }
 
-    isolated resource function post builds/ci/status(@http:Header string? authorization) returns error? {
+    isolated resource function post builds/ci/status(@http:Header string? authorization) returns http:Unauthorized|() {
         http:FileUserStoreConfig config = {};
         http:ListenerFileUserStoreBasicAuthHandler handler = new (config);
         auth:UserDetails|http:Unauthorized authn = handler.authenticate(authorization is () ? "" : authorization);
@@ -112,10 +110,13 @@ service /cst on endpoint {
             string[] CiPendingCicdIdList = getCiPendingCicdIdList(whereClause);
             updateCiStatus(CiPendingCicdIdList);
             updateCiStatusCicdTable(CiPendingCicdIdList);
+        } else {
+            return authn;
         }
+        return;
     }
 
-    isolated resource function post builds/cd/trigger(@http:Header string? authorization) returns error? {
+    isolated resource function post builds/cd/trigger(@http:Header string? authorization) returns http:Unauthorized|error|() {
         http:FileUserStoreConfig config = {};
         http:ListenerFileUserStoreBasicAuthHandler handler = new (config);
         auth:UserDetails|http:Unauthorized authn = handler.authenticate(authorization is () ? "" : authorization);
@@ -162,27 +163,35 @@ service /cst on endpoint {
                     }
                 }
             }
+        } else {
+            return authn;
         }
+        return;
     }
-    isolated resource function post builds/cd/status(@http:Header string? authorization) returns error? {
+    isolated resource function post builds/cd/status(@http:Header string? authorization) returns http:Unauthorized|() {
         http:FileUserStoreConfig config = {};
         http:ListenerFileUserStoreBasicAuthHandler handler = new (config);
         auth:UserDetails|http:Unauthorized authn = handler.authenticate(authorization is () ? "" : authorization);
         if authn is auth:UserDetails {
             updateInProgressCdBuilds();
             updateCdResultCicdParentTable();
+        } else {
+            return authn;
         }
+        return;
     }
 
-    isolated resource function get hai(@http:Header string? authorization) returns string {
+    isolated resource function get hai(@http:Header string? authorization) returns string|http:Unauthorized {
         http:FileUserStoreConfig config = {};
         http:ListenerFileUserStoreBasicAuthHandler handler = new (config);
         string customerId = "";
         auth:UserDetails|http:Unauthorized authn = handler.authenticate(authorization is () ? "" : authorization);
         if authn is auth:UserDetails {
             customerId = authn.username;
+            return customerId;
+        } else {
+            return authn;
         }
-        return customerId;
     }
 
     isolated resource function get builds/[string cicdId]() returns Chunkinfo|error {
