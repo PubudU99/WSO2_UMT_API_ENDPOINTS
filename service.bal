@@ -101,7 +101,7 @@ service /cst on endpoint {
     }
 
     isolated resource function post builds/ci/status(@http:Header string? x_authorization) returns http:Unauthorized|http:Ok {
-        string accessToken = regex:split(<string>x_authorization, " ")[1];
+        string accessToken = <string>x_authorization;
         if (accessToken == webhookAccessToken) {
             sql:ParameterizedQuery whereClause = `ci_result = "inProgress"`;
             string[] CiPendingCicdIdList = getCiPendingCicdIdList(whereClause);
@@ -114,7 +114,7 @@ service /cst on endpoint {
     }
 
     isolated resource function post builds/cd/trigger(@http:Header string? x_authorization) returns http:Unauthorized|http:Ok {
-        string accessToken = regex:split(<string>x_authorization, " ")[1];
+        string accessToken = <string>x_authorization;
         if (accessToken == webhookAccessToken) {
             sql:ParameterizedQuery whereClause = `ci_result = "inProgress" OR ci_result = "succeeded"`;
             string[] CiPendingCicdIdList = getCiPendingCicdIdList(whereClause);
@@ -167,7 +167,7 @@ service /cst on endpoint {
         }
     }
     isolated resource function post builds/cd/status(@http:Header string? x_authorization) returns http:Unauthorized|http:Ok {
-        string accessToken = regex:split(<string>x_authorization, " ")[1];
+        string accessToken = <string>x_authorization;
         if (accessToken == webhookAccessToken) {
             updateInProgressCdBuilds();
             updateCdResultCicdParentTable();
