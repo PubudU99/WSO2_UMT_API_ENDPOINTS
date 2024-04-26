@@ -100,8 +100,8 @@ service /cst on endpoint {
         }
     }
 
-    isolated resource function post builds/ci/status(@http:Header string? authorization) returns http:Unauthorized|http:Ok {
-        string accessToken = regex:split(<string>authorization, " ")[1];
+    isolated resource function post builds/ci/status(@http:Header string? x_authorization) returns http:Unauthorized|http:Ok {
+        string accessToken = regex:split(<string>x_authorization, " ")[1];
         if (accessToken == webhookAccessToken) {
             sql:ParameterizedQuery whereClause = `ci_result = "inProgress"`;
             string[] CiPendingCicdIdList = getCiPendingCicdIdList(whereClause);
@@ -113,8 +113,8 @@ service /cst on endpoint {
         }
     }
 
-    isolated resource function post builds/cd/trigger(@http:Header string? authorization) returns http:Unauthorized|http:Ok {
-        string accessToken = regex:split(<string>authorization, " ")[1];
+    isolated resource function post builds/cd/trigger(@http:Header string? x_authorization) returns http:Unauthorized|http:Ok {
+        string accessToken = regex:split(<string>x_authorization, " ")[1];
         if (accessToken == webhookAccessToken) {
             sql:ParameterizedQuery whereClause = `ci_result = "inProgress" OR ci_result = "succeeded"`;
             string[] CiPendingCicdIdList = getCiPendingCicdIdList(whereClause);
@@ -166,8 +166,8 @@ service /cst on endpoint {
             return http:UNAUTHORIZED;
         }
     }
-    isolated resource function post builds/cd/status(@http:Header string? authorization) returns http:Unauthorized|http:Ok {
-        string accessToken = regex:split(<string>authorization, " ")[1];
+    isolated resource function post builds/cd/status(@http:Header string? x_authorization) returns http:Unauthorized|http:Ok {
+        string accessToken = regex:split(<string>x_authorization, " ")[1];
         if (accessToken == webhookAccessToken) {
             updateInProgressCdBuilds();
             updateCdResultCicdParentTable();
@@ -177,8 +177,10 @@ service /cst on endpoint {
         }
     }
 
-    isolated resource function get hai(@http:Header string? authorization) returns http:Unauthorized|http:Ok {
-        string accessToken = regex:split(<string>authorization, " ")[1];
+    isolated resource function get hai(@http:Header string? x_authorization) returns http:Unauthorized|http:Ok {
+        io:println(x_authorization);
+        // string accessToken = regex:split(<string>authorization, " ")[1];
+        string accessToken = <string>x_authorization;
         if (accessToken == webhookAccessToken) {
             io:println(accessToken);
             return http:OK;
