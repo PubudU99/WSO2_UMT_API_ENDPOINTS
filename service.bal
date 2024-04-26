@@ -100,7 +100,7 @@ service /cst on endpoint {
         }
     }
 
-    isolated resource function post builds/ci/status(@http:Header string? authorization) returns http:Unauthorized & readonly|http:Ok & readonly|error {
+    isolated resource function post builds/ci/status(@http:Header string? authorization) returns http:Unauthorized|http:Ok {
         string accessToken = regex:split(<string>authorization, " ")[1];
         if (accessToken == webhookAccessToken) {
             sql:ParameterizedQuery whereClause = `ci_result = "inProgress"`;
@@ -113,7 +113,7 @@ service /cst on endpoint {
         }
     }
 
-    isolated resource function post builds/cd/trigger(@http:Header string? authorization) returns http:Unauthorized & readonly|http:Ok & readonly|error {
+    isolated resource function post builds/cd/trigger(@http:Header string? authorization) returns http:Unauthorized|http:Ok {
         string accessToken = regex:split(<string>authorization, " ")[1];
         if (accessToken == webhookAccessToken) {
             sql:ParameterizedQuery whereClause = `ci_result = "inProgress" OR ci_result = "succeeded"`;
@@ -166,7 +166,7 @@ service /cst on endpoint {
             return http:UNAUTHORIZED;
         }
     }
-    isolated resource function post builds/cd/status(@http:Header string? authorization) returns http:Unauthorized & readonly|http:Ok & readonly|error {
+    isolated resource function post builds/cd/status(@http:Header string? authorization) returns http:Unauthorized|http:Ok {
         string accessToken = regex:split(<string>authorization, " ")[1];
         if (accessToken == webhookAccessToken) {
             updateInProgressCdBuilds();
@@ -177,7 +177,7 @@ service /cst on endpoint {
         }
     }
 
-    isolated resource function get hai(@http:Header string? authorization) returns http:Unauthorized & readonly|http:Ok & readonly {
+    isolated resource function get hai(@http:Header string? authorization) returns http:Unauthorized|http:Ok {
         string accessToken = regex:split(<string>authorization, " ")[1];
         if (accessToken == webhookAccessToken) {
             io:println(accessToken);
