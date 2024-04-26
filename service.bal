@@ -1,4 +1,3 @@
-import ballerina/auth;
 import ballerina/http;
 import ballerina/io;
 import ballerina/persist;
@@ -102,8 +101,8 @@ service /cst on endpoint {
     }
 
     isolated resource function post builds/ci/status(@http:Header string? authorization) returns http:Unauthorized & readonly|http:Ok & readonly|error {
-        [string, string] [username, password] = check auth:extractUsernameAndPassword(regex:split(<string>authorization, " ")[1]);
-        if (username == basicAuthUsername && password == basicAuthPassword) {
+        string accessToken = regex:split(<string>authorization, " ")[1];
+        if (accessToken == webhookAccessToken) {
             sql:ParameterizedQuery whereClause = `ci_result = "inProgress"`;
             string[] CiPendingCicdIdList = getCiPendingCicdIdList(whereClause);
             updateCiStatus(CiPendingCicdIdList);
@@ -115,8 +114,8 @@ service /cst on endpoint {
     }
 
     isolated resource function post builds/cd/trigger(@http:Header string? authorization) returns http:Unauthorized & readonly|http:Ok & readonly|error {
-        [string, string] [username, password] = check auth:extractUsernameAndPassword(regex:split(<string>authorization, " ")[1]);
-        if (username == basicAuthUsername && password == basicAuthPassword) {
+        string accessToken = regex:split(<string>authorization, " ")[1];
+        if (accessToken == webhookAccessToken) {
             sql:ParameterizedQuery whereClause = `ci_result = "inProgress" OR ci_result = "succeeded"`;
             string[] CiPendingCicdIdList = getCiPendingCicdIdList(whereClause);
             foreach string cicdId in CiPendingCicdIdList {
@@ -168,8 +167,8 @@ service /cst on endpoint {
         }
     }
     isolated resource function post builds/cd/status(@http:Header string? authorization) returns http:Unauthorized & readonly|http:Ok & readonly|error {
-        [string, string] [username, password] = check auth:extractUsernameAndPassword(regex:split(<string>authorization, " ")[1]);
-        if (username == basicAuthUsername && password == basicAuthPassword) {
+        string accessToken = regex:split(<string>authorization, " ")[1];
+        if (accessToken == webhookAccessToken) {
             updateInProgressCdBuilds();
             updateCdResultCicdParentTable();
             return http:OK;
@@ -178,10 +177,10 @@ service /cst on endpoint {
         }
     }
 
-    isolated resource function get hai(@http:Header string? authorization) returns http:Unauthorized & readonly|http:Ok & readonly|error {
-        [string, string] [username, password] = check auth:extractUsernameAndPassword(regex:split(<string>authorization, " ")[1]);
-        if (username == basicAuthUsername && password == basicAuthPassword) {
-            io:println(username + " " + password);
+    isolated resource function get hai(@http:Header string? authorization) returns http:Unauthorized & readonly|http:Ok & readonly {
+        string accessToken = regex:split(<string>authorization, " ")[1];
+        if (accessToken == webhookAccessToken) {
+            io:println(accessToken);
             return http:OK;
         } else {
             return http:UNAUTHORIZED;

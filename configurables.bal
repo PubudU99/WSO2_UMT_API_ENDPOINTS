@@ -9,6 +9,5 @@ configurable string PAT_AZURE_DEVOPS = ?;
 configurable string acrUsername = ?;
 configurable string acrPassword = ?;
 
-# Basic authentication object
-configurable string basicAuthUsername = ?;
-configurable string basicAuthPassword = ?;
+# Bearer authentication object
+configurable string webhookAccessToken = ?;
