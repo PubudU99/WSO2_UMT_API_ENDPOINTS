@@ -9,7 +9,7 @@ DROP TABLE IF EXISTS `cicd_build`;
 DROP TABLE IF EXISTS `customer`;
 
 CREATE TABLE `customer` (
-	`id` VARCHAR(191) NOT NULL,
+	`id` INT NOT NULL AUTO_INCREMENT,
 	`customer_key` VARCHAR(191) NOT NULL,
 	`environment` VARCHAR(191) NOT NULL,
 	`product_name` VARCHAR(191) NOT NULL,
@@ -22,26 +22,29 @@ CREATE TABLE `cicd_build` (
 	`id` VARCHAR(191) NOT NULL,
 	`ci_result` VARCHAR(191) NOT NULL,
 	`cd_result` VARCHAR(191) NOT NULL,
+	`event_timestamp` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	PRIMARY KEY(`id`)
 );
 
 CREATE TABLE `ci_build` (
-	`id` VARCHAR(191) NOT NULL,
+	`id` INT NOT NULL AUTO_INCREMENT,
 	`ci_build_id` INT NOT NULL,
 	`ci_status` VARCHAR(191) NOT NULL,
 	`product` VARCHAR(191) NOT NULL,
 	`version` VARCHAR(191) NOT NULL,
 	`update_level` VARCHAR(191) NOT NULL,
+	`event_timestamp` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	`cicd_buildId` VARCHAR(191) NOT NULL,
 	FOREIGN KEY(`cicd_buildId`) REFERENCES `cicd_build`(`id`),
 	PRIMARY KEY(`id`)
 );
 
 CREATE TABLE `cd_build` (
-	`id` VARCHAR(191) NOT NULL,
+	`id` INT NOT NULL AUTO_INCREMENT,
 	`cd_build_id` INT NOT NULL,
 	`cd_status` VARCHAR(191) NOT NULL,
 	`customer` VARCHAR(191) NOT NULL,
+	`event_timestamp` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	`cicd_buildId` VARCHAR(191) NOT NULL,
 	FOREIGN KEY(`cicd_buildId`) REFERENCES `cicd_build`(`id`),
 	PRIMARY KEY(`id`)

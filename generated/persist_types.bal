@@ -4,7 +4,7 @@
 // It should not be modified by hand.
 
 public type customer record {|
-    readonly string id;
+    readonly int id;
     string customer_key;
     string environment;
     string product_name;
@@ -13,7 +13,7 @@ public type customer record {|
 |};
 
 public type customerOptionalized record {|
-    string id?;
+    int id?;
     string customer_key?;
     string environment?;
     string product_name?;
@@ -37,12 +37,14 @@ public type cicd_build record {|
     readonly string id;
     string ci_result;
     string cd_result;
+    string event_timestamp;
 |};
 
 public type cicd_buildOptionalized record {|
     string id?;
     string ci_result?;
     string cd_result?;
+    string event_timestamp?;
 |};
 
 public type cicd_buildWithRelations record {|
@@ -58,25 +60,28 @@ public type cicd_buildInsert cicd_build;
 public type cicd_buildUpdate record {|
     string ci_result?;
     string cd_result?;
+    string event_timestamp?;
 |};
 
 public type ci_build record {|
-    readonly string id;
+    readonly int id;
     int ci_build_id;
     string ci_status;
     string product;
     string version;
     string update_level;
+    string event_timestamp;
     string cicd_buildId;
 |};
 
 public type ci_buildOptionalized record {|
-    string id?;
+    int id?;
     int ci_build_id?;
     string ci_status?;
     string product?;
     string version?;
     string update_level?;
+    string event_timestamp?;
     string cicd_buildId?;
 |};
 
@@ -95,22 +100,25 @@ public type ci_buildUpdate record {|
     string product?;
     string version?;
     string update_level?;
+    string event_timestamp?;
     string cicd_buildId?;
 |};
 
 public type cd_build record {|
-    readonly string id;
+    readonly int id;
     int cd_build_id;
     string cd_status;
     string customer;
+    string event_timestamp;
     string cicd_buildId;
 |};
 
 public type cd_buildOptionalized record {|
-    string id?;
+    int id?;
     int cd_build_id?;
     string cd_status?;
     string customer?;
+    string event_timestamp?;
     string cicd_buildId?;
 |};
 
@@ -127,6 +135,7 @@ public type cd_buildUpdate record {|
     int cd_build_id?;
     string cd_status?;
     string customer?;
+    string event_timestamp?;
     string cicd_buildId?;
 |};
 

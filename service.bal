@@ -11,6 +11,14 @@ final Client sClient = check initializeClient();
 
 service /cst on endpoint {
 
+    isolated resource function post customer(CustomerInsertCopy[] list) returns error? {
+        foreach CustomerInsertCopy customer in list {
+            _ = check sClient->executeNativeSQL(`
+                INSERT INTO customer (customer_key, environment, product_name, product_base_version, u2_level)
+                VALUES (${customer.customerKey}, ${customer.environment}, ${customer.productName}, ${customer.productBaseversion}, ${customer.u2Level});`);
+        }
+    }
+
     isolated resource function get customer() returns customer[]|persist:Error {
         stream<customer, persist:Error?> response = sClient->/customers;
         return check from customer customer in response
@@ -21,8 +29,8 @@ service /cst on endpoint {
         do {
             string UUID = uuid:createType4AsString();
             check caller->respond(UUID);
-            cicd_build insertCicdbuild = check insertCicdBuild(UUID);
-            ci_buildInsert[] ciBuildInsertList = [];
+            check insertCicdBuild(UUID);
+            ciBuildInsertCopy[] ciBuildInsertList = [];
             string[] productsInvolved = [];
             if productUpdates is ProductRegularUpdate[] {
                 ProductRegularUpdate[] filteredProductUpdates = getFilteredProductUpdates(productUpdates);
@@ -30,14 +38,13 @@ service /cst on endpoint {
                     json response = triggerAzureEndpointCiBuild(product.productName, product.productBaseversion, "regular update");
                     int ciRunId = check response.id;
                     string ciRunState = check response.state;
-                    ci_buildInsert tmp = {
-                        id: uuid:createType4AsString(),
-                        ci_build_id: ciRunId,
-                        ci_status: ciRunState,
+                    ciBuildInsertCopy tmp = {
+                        ciBuildId: ciRunId,
+                        ciStatus: ciRunState,
                         product: product.productName,
                         version: product.productBaseversion,
-                        cicd_buildId: insertCicdbuild.id,
-                        update_level: "latest_test_level"
+                        cicdBuildId: UUID,
+                        updateLevel: "latest_test_level"
                     };
                     ciBuildInsertList.push(tmp);
                 }
@@ -51,14 +58,13 @@ service /cst on endpoint {
                     json response = triggerAzureEndpointCiBuild(productUpdates.productName, productUpdates.productVersion, "hotfix update", updateLevel);
                     int ciRunId = check response.id;
                     string ciRunState = check response.state;
-                    ci_buildInsert tmp = {
-                        id: uuid:createType4AsString(),
-                        ci_build_id: ciRunId,
-                        ci_status: ciRunState,
+                    ciBuildInsertCopy tmp = {
+                        ciBuildId: ciRunId,
+                        ciStatus: ciRunState,
                         product: productUpdates.productName,
                         version: productUpdates.productVersion,
-                        cicd_buildId: insertCicdbuild.id,
-                        update_level: "hotfix_update_level"
+                        cicdBuildId: UUID,
+                        updateLevel: "hotfix_update_level"
                     };
                     ciBuildInsertList.push(tmp);
                     productsInvolved = getProductListForInvolvedCustomerUpdateLevel([
@@ -81,18 +87,21 @@ service /cst on endpoint {
                 json response = triggerAzureEndpointCiBuild(productName, productBaseversion, "regular update", updateLevel);
                 int ciRunId = check response.id;
                 string ciRunState = check response.state;
-                ci_buildInsert tmp = {
-                    id: uuid:createType4AsString(),
-                    ci_build_id: ciRunId,
-                    ci_status: ciRunState,
+                ciBuildInsertCopy tmp = {
+                    ciBuildId: ciRunId,
+                    ciStatus: ciRunState,
                     product: productName,
                     version: productBaseversion,
-                    cicd_buildId: insertCicdbuild.id,
-                    update_level: updateLevel
+                    cicdBuildId: UUID,
+                    updateLevel: updateLevel
                 };
                 ciBuildInsertList.push(tmp);
             }
-            string[] _ = check sClient->/ci_builds.post(ciBuildInsertList);
+            foreach ciBuildInsertCopy ciBuild in ciBuildInsertList {
+                _ = check sClient->executeNativeSQL(`
+                INSERT INTO ci_build (ci_build_id, ci_status, product, version, update_level, cicd_buildId)
+                VALUES (${ciBuild.ciBuildId}, ${ciBuild.ciStatus}, ${ciBuild.product}, ${ciBuild.version}, ${ciBuild.updateLevel}, ${ciBuild.cicdBuildId});`);
+            }
         }
         on fail var e {
             io:println("Error in resource function trigger CI builds.");
@@ -140,16 +149,15 @@ service /cst on endpoint {
                         stream<cd_build, persist:Error?> cd_response = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${cicdId} and customer = ${customer}`);
                         var cdBuildResponse = cd_response.next();
                         if cdBuildResponse is error? {
-                            cd_buildInsert[] tmp = [
-                                {
-                                    id: uuid:createType4AsString(),
-                                    cd_build_id: -1,
-                                    cd_status: "failed",
-                                    customer: customer,
-                                    cicd_buildId: cicdId
-                                }
-                            ];
-                            string[] _ = check sClient->/cd_builds.post(tmp);
+                            cdBuildInsertCopy tmp = {
+                                cdBuildId: -1,
+                                cdStatus: "failed",
+                                customer: customer,
+                                cicdBuildId: cicdId
+                            };
+                            _ = check sClient->executeNativeSQL(`
+                                    INSERT INTO ci_build (cd_build_id, cd_status, customer, cicd_buildId)
+                                    VALUES (${tmp.cdBuildId}, ${tmp.cdStatus}, ${tmp.customer}, ${tmp.cicdBuildId});`);
                             updateCdResultCicdParentTable();
                         }
                     } else if !anyBuildStillInProgress {
@@ -187,7 +195,7 @@ service /cst on endpoint {
         }
     }
 
-    isolated resource function get builds/[string cicdId]() returns Chunkinfo|error {
+    isolated resource function get builds/[int cicdId]() returns Chunkinfo|error {
         CiBuildInfo[] ciBuild = getCiBuildinfo(cicdId);
         CdBuildInfo[] cdBuild = check getCdBuildinfo(cicdId);
         Chunkinfo chunkInfo = {

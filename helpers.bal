@@ -3,7 +3,6 @@ import ballerina/io;
 import ballerina/persist;
 import ballerina/regex;
 import ballerina/sql;
-import ballerina/uuid;
 
 isolated function getPipelineURL(string organization, string project, string pipeline_id) returns string {
     return "https://dev.azure.com/" + organization + "/" + project + "/_apis/pipelines/" + pipeline_id;
@@ -125,7 +124,7 @@ isolated function getMapCiIdState(map<int> mapProductCiId) returns map<string> {
         var ciBuildResponse = check response.next();
         if ciBuildResponse !is error? {
             json ciBuildResponseJson = check ciBuildResponse.value.fromJsonWithType();
-            string ciBuildRecordId = check ciBuildResponseJson.id;
+            int ciBuildRecordId = check ciBuildResponseJson.id;
             if runState.equalsIgnoreCaseAscii("completed") {
                 string runResult = check run.result;
                 ci_build _ = check sClient->/ci_builds/[ciBuildRecordId].put({
@@ -147,26 +146,6 @@ isolated function initializeClient() returns Client|persist:Error {
     return new Client();
 }
 
-isolated function getCustomersToInsert(CustomerInsertCopy[] list) returns customerInsert[] {
-    customerInsert[] cst_info_list = [];
-
-    foreach CustomerInsertCopy item in list {
-
-        customerInsert tmp = {
-            id: uuid:createType4AsString(),
-            customer_key: item.customerKey,
-            environment: item.environment,
-            product_name: item.productName,
-            product_base_version: item.productBaseversion,
-            u2_level: item.u2Level
-        };
-
-        cst_info_list.push(tmp);
-    }
-
-    return cst_info_list;
-}
-
 isolated function createProductWhereClause(ProductRegularUpdate[] product_list) returns sql:ParameterizedQuery {
     sql:ParameterizedQuery whereClause = ``;
     int i = 0;
@@ -181,20 +160,11 @@ isolated function createProductWhereClause(ProductRegularUpdate[] product_list) 
     return whereClause;
 }
 
-isolated function insertCicdBuild(string uuid) returns cicd_buildInsert|error {
-    cicd_buildInsert[] cicdBuildInsertList = [];
+isolated function insertCicdBuild(string uuid) returns error? {
+    _ = check sClient->executeNativeSQL(`
+                                    INSERT INTO cicd_build (id, ci_result, cd_result)
+                                    VALUES (${uuid}, "inProgress", "pending");`);
 
-    cicd_buildInsert tmp = {
-        id: uuid,
-        ci_result: "inProgress",
-        cd_result: "pending"
-    };
-
-    cicdBuildInsertList.push(tmp);
-
-    string[] _ = check sClient->/cicd_builds.post(cicdBuildInsertList);
-
-    return tmp;
 }
 
 isolated function createMapCustomerCiList(string[] product_list, map<int> mapProductCiId) returns map<string[]> {
@@ -264,7 +234,7 @@ isolated function updateCiStatus(string[] idList) {
         while ciBuildResponse !is error? {
             json ciBuildResponseJson = check ciBuildResponse.value.fromJsonWithType();
             int ciBuildId = check ciBuildResponseJson.ci_build_id;
-            string ciId = check ciBuildResponseJson.id;
+            int ciId = check ciBuildResponseJson.id;
             json runResponse = check pipeline->/runs/[ciBuildId].get(api\-version = "7.1-preview.1");
             string runState = check runResponse.state;
             string runResult;
@@ -515,16 +485,15 @@ isolated function insertNewCdBuilds(string cicdId, string customer) {
             json response = triggerAzureEndpointCdBuild(customer, helmOverideValuesString);
             int cdRunId = check response.id;
             string cdRunState = check response.state;
-            cd_buildInsert[] tmp = [
-                {
-                    id: uuid:createType4AsString(),
-                    cd_build_id: cdRunId,
-                    cd_status: cdRunState,
-                    customer: customer,
-                    cicd_buildId: cicdId
-                }
-            ];
-            string[] _ = check sClient->/cd_builds.post(tmp);
+            cdBuildInsertCopy tmp = {
+                cdBuildId: cdRunId,
+                cdStatus: cdRunState,
+                customer: customer,
+                cicdBuildId: cicdId
+            };
+            _ = check sClient->executeNativeSQL(`
+                                    INSERT INTO cd_build (cd_build_id, cd_status, customer, cicd_buildId)
+                                    VALUES (${tmp.cdBuildId}, ${tmp.cdStatus}, ${tmp.customer}, ${tmp.cicdBuildId});`);
             io:println("Start CD pipeline of customer " + customer);
             io:println("Create an entry in cd_build table");
         }
@@ -540,7 +509,7 @@ isolated function updateInProgressCdBuilds() {
     while cdBuildResponse !is error? {
         json cdBuildResponseJson = check cdBuildResponse.value.fromJsonWithType();
         int cd_build_id = check cdBuildResponseJson.cd_build_id;
-        string cdBuildRecordId = check cdBuildResponseJson.id;
+        int cdBuildRecordId = check cdBuildResponseJson.id;
         json run = getRunResult(cd_build_id.toString());
         string runState = check run.state;
         if runState.equalsIgnoreCaseAscii("completed") {
@@ -561,7 +530,7 @@ isolated function retriggerFailedCiBuilds(string cicdId) {
     var ciResponse = ciResponseStream.next();
     while ciResponse !is error? {
         json ciRepsonseJson = check ciResponse.value.fromJsonWithType();
-        string ciBuildRecordId = check ciRepsonseJson.id;
+        int ciBuildRecordId = check ciRepsonseJson.id;
         string product = check ciRepsonseJson.product;
         string version = check ciRepsonseJson.version;
         string updateLevel = check ciRepsonseJson.update_level;
@@ -611,7 +580,7 @@ isolated function deleteFailedCdBuilds(string cicdId) {
     var cdBuildResponse = cdResponse.next();
     while cdBuildResponse !is error? {
         json cdBuildRepsonseJson = check cdBuildResponse.value.fromJsonWithType();
-        string cdBuildRecordId = check cdBuildRepsonseJson.id;
+        int cdBuildRecordId = check cdBuildRepsonseJson.id;
         cd_build _ = check sClient->/cd_builds/[cdBuildRecordId].delete;
         cdBuildResponse = cdResponse.next();
     } on fail var e {
@@ -744,7 +713,7 @@ isolated function getFilteredProductUpdates(ProductRegularUpdate[] productList) 
     return filteredProducts;
 }
 
-isolated function getCiBuildinfo(string cicdId) returns CiBuildInfo[] {
+isolated function getCiBuildinfo(int cicdId) returns CiBuildInfo[] {
     CiBuildInfo[] ciBuildList = [];
     stream<ci_build, persist:Error?> ciResponseStream = sClient->/ci_builds.get(ci_build, `cicd_buildId = ${cicdId}`);
     var ciBuildResponse = ciResponseStream.next();
@@ -776,7 +745,7 @@ isolated function getCiBuildinfo(string cicdId) returns CiBuildInfo[] {
     return ciBuildList;
 }
 
-isolated function getCdBuildinfo(string cicdId) returns CdBuildInfo[]|error {
+isolated function getCdBuildinfo(int cicdId) returns CdBuildInfo[]|error {
     CdBuildInfo[] cdBuildList = [];
     stream<cd_build, persist:Error?> cdResponseStream = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${cicdId}`);
     var cdBuildResponse = cdResponseStream.next();

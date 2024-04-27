@@ -6,6 +6,22 @@ type CustomerInsertCopy record {|
     string u2Level;
 |};
 
+type ciBuildInsertCopy record {|
+    int ciBuildId;
+    string ciStatus;
+    string product;
+    string version;
+    string cicdBuildId;
+    string updateLevel;
+|};
+
+type cdBuildInsertCopy record {
+    int cdBuildId;
+    string cdStatus;
+    string customer;
+    string cicdBuildId;
+};
+
 type CiBuildInfo record {|
     string product;
     string version;
@@ -20,7 +36,7 @@ type CdBuildInfo record {|
 |};
 
 type Chunkinfo record {|
-    string id;
+    int id;
     CiBuildInfo[] ciBuild;
     CdBuildInfo[] cdBuild;
 |};
