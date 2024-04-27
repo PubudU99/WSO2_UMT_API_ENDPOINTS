@@ -185,16 +185,6 @@ service /cst on endpoint {
         }
     }
 
-    isolated resource function get hai(@http:Header string? authorization) returns http:Unauthorized|http:Ok {
-        string accessToken = regex:split(<string>authorization, " ")[1];
-        if (accessToken == webhookAccessToken) {
-            io:println(accessToken);
-            return http:OK;
-        } else {
-            return http:UNAUTHORIZED;
-        }
-    }
-
     isolated resource function get builds/[int cicdId]() returns Chunkinfo|error {
         CiBuildInfo[] ciBuild = getCiBuildinfo(cicdId);
         CdBuildInfo[] cdBuild = check getCdBuildinfo(cicdId);

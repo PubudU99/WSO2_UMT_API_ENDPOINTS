@@ -232,17 +232,3 @@ paths:
             description: Validation exception
         security:
         - oauth2sample: [umtEndpoints]
-  "/hai":
-      get:
-        tags:
-          - cst
-        responses:
-          '400':
-            description: Invalid input
-          '422':
-            description: Validation exception
-        
-        security:
-        - oauth2sample: [umtEndpoints]
-                  
-
