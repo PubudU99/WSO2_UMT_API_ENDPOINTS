@@ -7,6 +7,11 @@ info:
     - Request payload: nill
     - Response body: Available list of CSTs for the given details. (empty array if no tests available)
 
+    API to insert CSTs
+    - Method: POST
+    - Request payload: List of objects containing {customerKey, environment, productName, productBaseversion, u2Level}
+    - Response body: Available list of CSTs for the given details. (empty array if no tests available)
+
     API to trigger the CI builds.
     - Method: POST
     - Request payload: (parameters we discussed the other day) Customer key, product name, product version etc.
@@ -96,6 +101,40 @@ paths:
           description: Validation exception
       security:
         - oauth2sample: [umtEndpoints]
+    post:
+      tags:
+        - cst
+      summary: Insert customers
+      description:
+        Insert cst customer info to customer table
+      requestBody:
+        description: 
+          Provide the list of object with List of objects containing {customerKey, environment, productName, productBaseversion, u2Level}
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties: 
+                  customerKey:
+                    type: string
+                  environment:
+                    type: string
+                  productName:
+                    type: string
+                  productBaseversion:
+                    type: string
+                  u2Level:
+                    type: string
+        required: true
+      responses:
+        "200":
+          description: successful operation
+      security:
+        - oauth2sample: [umtEndpoints]
+
+
       
   "/builds":
     post:
