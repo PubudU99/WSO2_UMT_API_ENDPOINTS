@@ -36,7 +36,7 @@ type CdBuildInfo record {|
 |};
 
 type Chunkinfo record {|
-    int id;
+    string id;
     CiBuildInfo[] ciBuild;
     CdBuildInfo[] cdBuild;
 |};

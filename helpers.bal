@@ -699,7 +699,7 @@ isolated function getFilteredProductUpdates(ProductRegularUpdate[] productList) 
     return filteredProducts;
 }
 
-isolated function getCiBuildinfo(int cicdId) returns CiBuildInfo[] {
+isolated function getCiBuildinfo(string cicdId) returns CiBuildInfo[] {
     CiBuildInfo[] ciBuildList = [];
     stream<ci_build, persist:Error?> ciResponseStream = sClient->/ci_builds.get(ci_build, `cicd_buildId = ${cicdId}`);
     var ciBuildResponse = ciResponseStream.next();
@@ -731,7 +731,7 @@ isolated function getCiBuildinfo(int cicdId) returns CiBuildInfo[] {
     return ciBuildList;
 }
 
-isolated function getCdBuildinfo(int cicdId) returns CdBuildInfo[]|error {
+isolated function getCdBuildinfo(string cicdId) returns CdBuildInfo[]|error {
     CdBuildInfo[] cdBuildList = [];
     stream<cd_build, persist:Error?> cdResponseStream = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${cicdId}`);
     var cdBuildResponse = cdResponseStream.next();

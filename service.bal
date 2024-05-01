@@ -185,7 +185,7 @@ service /cst on endpoint {
         }
     }
 
-    isolated resource function get builds/[int cicdId]() returns Chunkinfo|error {
+    isolated resource function get builds/[string cicdId]() returns Chunkinfo|error {
         CiBuildInfo[] ciBuild = getCiBuildinfo(cicdId);
         CdBuildInfo[] cdBuild = check getCdBuildinfo(cicdId);
         Chunkinfo chunkInfo = {
