@@ -4,8 +4,8 @@ import ballerina/persist;
 import ballerina/regex;
 import ballerina/sql;
 
-isolated function getPipelineURL(string organization, string project, string pipeline_id) returns string {
-    return "https://dev.azure.com/" + organization + "/" + project + "/_apis/pipelines/" + pipeline_id;
+isolated function getPipelineURL(string organization, string project, string pipelineId) returns string {
+    return "https://dev.azure.com/" + organization + "/" + project + "/_apis/pipelines/" + pipelineId;
 }
 
 isolated function getTimelineURL(string organization, string project) returns string {
@@ -23,8 +23,8 @@ isolated function runTimelineEndpoint() returns http:Client|error {
     return endpoint;
 }
 
-isolated function pipelineEndpoint(string pipeline_id) returns http:Client|error {
-    http:Client endpoint = check new (getPipelineURL(organization, project, pipeline_id), {
+isolated function pipelineEndpoint(string pipelineId) returns http:Client|error {
+    http:Client endpoint = check new (getPipelineURL(organization, project, pipelineId), {
         auth: {
             username: "PAT_AZURE_DEVOPS",
             password: PAT_AZURE_DEVOPS
@@ -146,20 +146,6 @@ isolated function initializeClient() returns Client|persist:Error {
     return new Client();
 }
 
-isolated function createProductWhereClause(ProductRegularUpdate[] product_list) returns sql:ParameterizedQuery {
-    sql:ParameterizedQuery whereClause = ``;
-    int i = 0;
-    while i < product_list.length() {
-        if (i == product_list.length() - 1) {
-            whereClause = sql:queryConcat(whereClause, `(product_name = ${product_list[i].productName} AND product_base_version = ${product_list[i].productBaseversion})`);
-        } else {
-            whereClause = sql:queryConcat(whereClause, `(product_name = ${product_list[i].productName} AND product_base_version = ${product_list[i].productBaseversion}) OR `);
-        }
-        i += 1;
-    }
-    return whereClause;
-}
-
 isolated function insertCicdBuild(string uuid) returns error? {
     _ = check sClient->executeNativeSQL(`
                                     INSERT INTO cicd_build (id, ci_result, cd_result)
@@ -167,10 +153,10 @@ isolated function insertCicdBuild(string uuid) returns error? {
 
 }
 
-isolated function createMapCustomerCiList(string[] product_list, map<int> mapProductCiId) returns map<string[]> {
+isolated function createMapCustomerCiList(string[] productList, map<int> mapProductCiId) returns map<string[]> {
     map<string[]> mapCustomerProduct = {};
     // If the product list is type ProductRegularUpdate
-    foreach string product in product_list {
+    foreach string product in productList {
         // selecting the customers whose deployment has the specific update products
         string productName = regex:split(product, "-")[0];
         string version = regex:split(product, "-")[1];
@@ -198,6 +184,52 @@ isolated function createMapCustomerCiList(string[] product_list, map<int> mapPro
         }
     }
     return mapCustomerProduct;
+}
+
+isolated function updateCdResultCicdParentTable() {
+    do {
+        stream<cicd_build, persist:Error?> cicdResponse = sClient->/cicd_builds.get(cicd_build, `cd_result = "inProgress"`);
+        var cicdBuildResponse = cicdResponse.next();
+        while cicdBuildResponse !is error? {
+            json cicdResponseJson = check cicdBuildResponse.value.fromJsonWithType();
+            string cicdId = check cicdResponseJson.id;
+            boolean allSucceededFlag = true;
+            boolean anyBuildFailedFlag = false;
+            boolean stillInPrgressFlag = false;
+            stream<cd_build, persist:Error?> cdResponseStream = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${cicdId}`);
+            var cdResponse = cdResponseStream.next();
+            while cdResponse !is error? {
+                json cdResponseJson = check cdResponse.value.fromJsonWithType();
+                string cdStatus = check cdResponseJson.cd_status;
+                if cdStatus.equalsIgnoreCaseAscii("failed") && !cdStatus.equalsIgnoreCaseAscii("inProgress") {
+                    anyBuildFailedFlag = true;
+                    allSucceededFlag = false;
+                    break;
+                }
+                if cdStatus.equalsIgnoreCaseAscii("inProgress") {
+                    allSucceededFlag = false;
+                    stillInPrgressFlag = true;
+                    break;
+                }
+                cdResponse = cdResponseStream.next();
+            }
+            if anyBuildFailedFlag && !stillInPrgressFlag {
+                cicd_build _ = check sClient->/cicd_builds/[cicdId].put({
+                    cd_result: "failed"
+                });
+            }
+            if allSucceededFlag {
+                cicd_build _ = check sClient->/cicd_builds/[cicdId].put({
+                    cd_result: "succeeded"
+                });
+            }
+            cicdBuildResponse = cicdResponse.next();
+        }
+    } on fail var e {
+        io:println("Error in function updateCdResultCicdParentTable");
+        io:println(e);
+    }
+
 }
 
 isolated function getCiPendingCicdIdList(sql:ParameterizedQuery whereClause) returns string[] {
@@ -312,52 +344,6 @@ isolated function getMapProductCiId(string cicdId) returns map<int> {
         io:println(e);
     }
     return mapProductCiId;
-}
-
-isolated function updateCdResultCicdParentTable() {
-    do {
-        stream<cicd_build, persist:Error?> cicdResponse = sClient->/cicd_builds.get(cicd_build, `cd_result = "inProgress"`);
-        var cicdBuildResponse = cicdResponse.next();
-        while cicdBuildResponse !is error? {
-            json cicdResponseJson = check cicdBuildResponse.value.fromJsonWithType();
-            string cicdId = check cicdResponseJson.id;
-            boolean allSucceededFlag = true;
-            boolean anyBuildFailedFlag = false;
-            boolean stillInPrgressFlag = false;
-            stream<cd_build, persist:Error?> cdResponseStream = sClient->/cd_builds.get(cd_build, `cicd_buildId = ${cicdId}`);
-            var cdResponse = cdResponseStream.next();
-            while cdResponse !is error? {
-                json cdResponseJson = check cdResponse.value.fromJsonWithType();
-                string cdStatus = check cdResponseJson.cd_status;
-                if cdStatus.equalsIgnoreCaseAscii("failed") && !cdStatus.equalsIgnoreCaseAscii("inProgress") {
-                    anyBuildFailedFlag = true;
-                    allSucceededFlag = false;
-                    break;
-                }
-                if cdStatus.equalsIgnoreCaseAscii("inProgress") {
-                    allSucceededFlag = false;
-                    stillInPrgressFlag = true;
-                    break;
-                }
-                cdResponse = cdResponseStream.next();
-            }
-            if anyBuildFailedFlag && !stillInPrgressFlag {
-                cicd_build _ = check sClient->/cicd_builds/[cicdId].put({
-                    cd_result: "failed"
-                });
-            }
-            if allSucceededFlag {
-                cicd_build _ = check sClient->/cicd_builds/[cicdId].put({
-                    cd_result: "succeeded"
-                });
-            }
-            cicdBuildResponse = cicdResponse.next();
-        }
-    } on fail var e {
-        io:println("Error in function updateCdResultCicdParentTable");
-        io:println(e);
-    }
-
 }
 
 isolated function updateCdResultCicdTable(string cicdId) {
@@ -598,9 +584,9 @@ isolated function getUniqueList(string[] s) returns string[] {
     return unique;
 }
 
-isolated function getProductListForInvolvedCustomerUpdateLevel(ProductRegularUpdate[] product_updates) returns string[] {
-    string[] customer_list = [];
-    foreach ProductRegularUpdate product in product_updates {
+isolated function getProductListForInvolvedCustomerUpdateLevel(ProductRegularUpdate[] productUpdates) returns string[] {
+    string[] customerList = [];
+    foreach ProductRegularUpdate product in productUpdates {
         string productName = product.productName;
         string version = product.productBaseversion;
         stream<customer, persist:Error?> customerResponseStream = sClient->/customers.get(customer, `(product_name = ${productName} AND product_base_version = ${version})`);
@@ -608,19 +594,19 @@ isolated function getProductListForInvolvedCustomerUpdateLevel(ProductRegularUpd
         while customerStreamItem !is error? {
             json customer = check customerStreamItem.value.fromJsonWithType();
             string customerName = check customer.customer_key;
-            customer_list.push(customerName);
+            customerList.push(customerName);
             customerStreamItem = customerResponseStream.next();
         } on fail var e {
             io:println("Error in resource function getCustomerListForUpdates.");
             io:println(e);
         }
     }
-    string[] customersInvolved = getUniqueList(customer_list);
+    string[] customersInvolved = getUniqueList(customerList);
     string[] productsInvolved = [];
 
     foreach string customerName in customersInvolved {
         sql:ParameterizedQuery whereClause = ``;
-        foreach ProductRegularUpdate product in product_updates {
+        foreach ProductRegularUpdate product in productUpdates {
             string productName = product.productName;
             string version = product.productBaseversion;
             whereClause = sql:queryConcat(whereClause, `NOT(product_name = ${productName} AND product_base_version = ${version}) AND `);
