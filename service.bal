@@ -34,21 +34,28 @@ service /cst on endpoint {
             string[] productsInvolved = [];
             if productUpdates is ProductRegularUpdate[] {
                 ProductRegularUpdate[] filteredProductUpdates = getFilteredProductUpdates(productUpdates);
-                foreach ProductRegularUpdate product in filteredProductUpdates {
-                    json response = triggerAzureEndpointCiBuild(product.productName, product.productBaseversion, "regular update");
-                    int ciRunId = check response.id;
-                    string ciRunState = check response.state;
-                    ciBuildInsertCopy tmp = {
-                        ciBuildId: ciRunId,
-                        ciStatus: ciRunState,
-                        product: product.productName,
-                        version: product.productBaseversion,
-                        cicdBuildId: UUID,
-                        updateLevel: "latest_test_level"
-                    };
-                    ciBuildInsertList.push(tmp);
+                if filteredProductUpdates.length() == 0 {
+                    check caller->respond("No CST Available");
                 }
-                productsInvolved = getProductListForInvolvedCustomerUpdateLevel(filteredProductUpdates);
+                else {
+                    check caller->respond(UUID);
+                    check insertCicdBuild(UUID);
+                    foreach ProductRegularUpdate product in filteredProductUpdates {
+                        json response = triggerAzureEndpointCiBuild(product.productName, product.productBaseversion, "regular update");
+                        int ciRunId = check response.id;
+                        string ciRunState = check response.state;
+                        ciBuildInsertCopy tmp = {
+                            ciBuildId: ciRunId,
+                            ciStatus: ciRunState,
+                            product: product.productName,
+                            version: product.productBaseversion,
+                            cicdBuildId: UUID,
+                            updateLevel: "latest_test_level"
+                        };
+                        ciBuildInsertList.push(tmp);
+                    }
+                    productsInvolved = getProductListForInvolvedCustomerUpdateLevel(filteredProductUpdates);
+                }
             } else {
                 stream<customer, persist:Error?> customerResponseStream = sClient->/customers.get(customer, `(product_name = ${productUpdates.productName} AND product_base_version = ${productUpdates.productVersion}) AND customer_key = ${productUpdates.customerKey}`);
                 var customerResponse = customerResponseStream.next();
