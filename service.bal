@@ -28,8 +28,6 @@ service /cst on endpoint {
     isolated resource function post builds(http:Caller caller, ProductRegularUpdate[]|ProductHotfixUpdate productUpdates) {
         do {
             string UUID = uuid:createType4AsString();
-            check caller->respond(UUID);
-            check insertCicdBuild(UUID);
             ciBuildInsertCopy[] ciBuildInsertList = [];
             string[] productsInvolved = [];
             if productUpdates is ProductRegularUpdate[] {
