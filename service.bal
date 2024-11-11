@@ -161,7 +161,7 @@ service /cst on endpoint {
                                 cicdBuildId: cicdId
                             };
                             _ = check sClient->executeNativeSQL(`
-                                    INSERT INTO ci_build (cd_build_id, cd_status, customer, cicd_buildId)
+                                    INSERT INTO cd_build (cd_build_id, cd_status, customer, cicd_buildId)
                                     VALUES (${tmp.cdBuildId}, ${tmp.cdStatus}, ${tmp.customer}, ${tmp.cicdBuildId});`);
                             updateCdResultCicdParentTable();
                         }
