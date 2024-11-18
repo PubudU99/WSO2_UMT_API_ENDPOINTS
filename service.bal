@@ -35,14 +35,17 @@ service /cst on endpoint {
                 if filteredProductUpdates.length() == 0 {
                     json UMTResponse = {
                         uuid:"",
-                        Reason:"No CST Available"  
+                        Reason:"No CST Available",
+                        cstAvailable:false
+
                     };
                     check caller->respond(UMTResponse);
                 }
                 else {
                     json UMTResponse = {
                         uuid:UUID,
-                        Reason:"CST Available"  
+                        Reason:"",
+                        cstAvailable:true
                     };
                     check caller->respond(UMTResponse);
                     check insertCicdBuild(UUID);
