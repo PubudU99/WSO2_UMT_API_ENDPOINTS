@@ -35,7 +35,7 @@ service /cst on endpoint {
                 if filteredProductUpdates.length() == 0 {
                     json UMTResponse = {
                         uuid:"",
-                        Reason:"No CST Available",
+                        reason:"No CST Available",
                         cstAvailable:false
 
                     };
@@ -44,7 +44,7 @@ service /cst on endpoint {
                 else {
                     json UMTResponse = {
                         uuid:UUID,
-                        Reason:"",
+                        reason:"",
                         cstAvailable:true
                     };
                     check caller->respond(UMTResponse);
