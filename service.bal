@@ -33,10 +33,18 @@ service /cst on endpoint {
             if productUpdates is ProductRegularUpdate[] {
                 ProductRegularUpdate[] filteredProductUpdates = getFilteredProductUpdates(productUpdates);
                 if filteredProductUpdates.length() == 0 {
-                    check caller->respond("No CST Available");
+                    json UMTResponse = {
+                        uuid:"",
+                        Reason:"No CST Available"  
+                    };
+                    check caller->respond(UMTResponse);
                 }
                 else {
-                    check caller->respond(UUID);
+                    json UMTResponse = {
+                        uuid:UUID,
+                        Reason:"CST Available"  
+                    };
+                    check caller->respond(UMTResponse));
                     check insertCicdBuild(UUID);
                     foreach ProductRegularUpdate product in filteredProductUpdates {
                         json response = triggerAzureEndpointCiBuild(product.productName, product.productBaseversion, "regular update");
